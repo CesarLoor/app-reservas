@@ -58,8 +58,6 @@ jobs:
       - name: Generate SonarQube token for this run
         id: sonar-token
         run: |
-          # SonarQube starts with admin/admin on a fresh instance.
-          # We generate a temporary token so we never hardcode credentials.
           RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" \
             -u admin:admin \
             --data-urlencode "name=ci-run-${{ github.run_id }}")
@@ -87,21 +85,36 @@ jobs:
             -Dsonar.exclusions="**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**" \
             -Dsonar.qualitygate.wait=true
 
-      - name: Generate SonarQube report artifact
+      - name: Generate SonarQube Markdown report
         if: always()
+        env:
+          SONAR_TOKEN_CI: ${{ steps.sonar-token.outputs.token }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_SHA: ${{ github.sha }}
+          GH_BRANCH: ${{ github.ref_name }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_SERVER: ${{ github.server_url }}
         run: |
           python3 << 'PYEOF'
-          import urllib.request, urllib.error, json, base64, datetime, os
+          import urllib.request, json, base64, datetime, os
 
           BASE    = "http://localhost:9000"
           PROJECT = "app-reservas"
-          TOKEN   = "${{ steps.sonar-token.outputs.token }}"
-          RUN_ID  = "${{ github.run_id }}"
-          SHA     = "${{ github.sha }}"[:7]
-          BRANCH  = "${{ github.ref_name }}"
-          ACTOR   = "${{ github.actor }}"
+          TOKEN   = os.environ["SONAR_TOKEN_CI"]
+          RUN_ID  = os.environ["GH_RUN_ID"]
+          SHA     = os.environ["GH_SHA"]
+          SHORT   = SHA[:7]
+          BRANCH  = os.environ["GH_BRANCH"]
+          ACTOR   = os.environ["GH_ACTOR"]
+          REPO    = os.environ["GH_REPO"]
+          SERVER  = os.environ["GH_SERVER"]
+          NOW     = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-          creds = base64.b64encode(f"{TOKEN}:".encode()).decode()
+          COMMIT_URL = f"{SERVER}/{REPO}/commit/{SHA}"
+          RUN_URL    = f"{SERVER}/{REPO}/actions/runs/{RUN_ID}"
+
+          creds   = base64.b64encode(f"{TOKEN}:".encode()).decode()
           headers = {"Authorization": f"Basic {creds}"}
 
           def api(path):
@@ -112,122 +125,122 @@ jobs:
               except Exception as e:
                   return {"error": str(e)}
 
-          # Quality Gate status
-          qg = api(f"/api/qualitygates/project_status?projectKey={PROJECT}")
-          qg_status   = qg.get("projectStatus", {}).get("status", "UNKNOWN")
-          qg_conditions = qg.get("projectStatus", {}).get("conditions", [])
+          # Quality Gate
+          qg_resp       = api(f"/api/qualitygates/project_status?projectKey={PROJECT}")
+          qg_status     = qg_resp.get("projectStatus", {}).get("status", "UNKNOWN")
+          qg_conditions = qg_resp.get("projectStatus", {}).get("conditions", [])
 
-          # Key metrics
-          metrics = [
+          # Metrics
+          metric_keys = [
+              "ncloc","bugs","vulnerabilities","code_smells","coverage",
+              "duplicated_lines_density","sqale_debt_ratio","sqale_index",
+              "complexity","cognitive_complexity",
               "blocker_violations","critical_violations","major_violations",
-              "coverage","duplicated_lines_density","sqale_debt_ratio",
-              "complexity","cognitive_complexity","security_hotspots_reviewed",
-              "ncloc","bugs","vulnerabilities","code_smells","sqale_index"
+              "security_hotspots","security_hotspots_reviewed"
           ]
-          measures_resp = api(f"/api/measures/component?component={PROJECT}&metricKeys={','.join(metrics)}")
-          measures = {m["metric"]: m.get("value","N/A")
-                      for m in measures_resp.get("component", {}).get("measures", [])}
+          m_resp   = api(f"/api/measures/component?component={PROJECT}&metricKeys={','.join(metric_keys)}")
+          measures = {m["metric"]: m.get("value", "–")
+                      for m in m_resp.get("component", {}).get("measures", [])}
 
-          # Build report data
-          now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-          report = {
-              "project":         PROJECT,
-              "branch":          BRANCH,
-              "commit":          SHA,
-              "author":          ACTOR,
-              "run_id":          RUN_ID,
-              "timestamp":       now,
-              "quality_gate":    qg_status,
-              "conditions":      qg_conditions,
-              "metrics":         measures
-          }
+          def val(k): return measures.get(k, "–")
 
-          os.makedirs("sonarqube-report", exist_ok=True)
-
-          # JSON report
-          with open("sonarqube-report/report.json", "w") as f:
-              json.dump(report, f, indent=2)
-
-          # HTML report
-          status_color = "#22c55e" if qg_status == "OK" else "#ef4444"
-          status_icon  = "✅" if qg_status == "OK" else "❌"
+          PASSED     = qg_status == "OK"
+          GATE_ICON  = "✅" if PASSED else "❌"
+          GATE_LABEL = "PASSED" if PASSED else "FAILED"
+          CMP        = {"GT": ">", "LT": "<", "EQ": "=", "NE": "≠"}
 
           cond_rows = ""
           for c in qg_conditions:
-              color = "#22c55e" if c.get("status") == "OK" else "#ef4444"
-              cond_rows += f"""
-              <tr>
-                <td>{c.get('metricKey','')}</td>
-                <td>{c.get('comparator','')}</td>
-                <td>{c.get('errorThreshold','')}</td>
-                <td>{c.get('actualValue','N/A')}</td>
-                <td style="color:{color};font-weight:bold">{c.get('status','')}</td>
-              </tr>"""
+              icon = "✅" if c.get("status") == "OK" else "❌"
+              cond_rows += (
+                  f"| {icon} | `{c.get('metricKey', '')}` "
+                  f"| {CMP.get(c.get('comparator', ''), c.get('comparator', ''))} "
+                  f"| `{c.get('errorThreshold', '–')}` "
+                  f"| **{c.get('actualValue', '–')}** |\n"
+              )
 
-          metric_labels = {
-              "ncloc":"Lines of Code","bugs":"Bugs","vulnerabilities":"Vulnerabilities",
-              "code_smells":"Code Smells","coverage":"Coverage (%)","duplicated_lines_density":"Duplicated Lines (%)",
-              "sqale_debt_ratio":"Tech Debt Ratio (%)","sqale_index":"Tech Debt (min)",
-              "complexity":"Cyclomatic Complexity","cognitive_complexity":"Cognitive Complexity",
-              "blocker_violations":"Blocker Issues","critical_violations":"Critical Issues",
-              "major_violations":"Major Issues","security_hotspots_reviewed":"Security Hotspots Reviewed (%)"
-          }
-          metric_rows = "".join(
-              f"<tr><td>{metric_labels.get(k,k)}</td><td><strong>{v}</strong></td></tr>"
-              for k,v in measures.items()
+          gate_msg = (
+              "> ✅ **El código cumple todos los umbrales del Quality Gate `StrictGate`.**"
+              if PASSED else
+              "> ❌ **El código NO cumple los umbrales del Quality Gate `StrictGate`. Revisa las condiciones fallidas.**"
           )
 
-          html = f"""<!DOCTYPE html>
-          <html lang="es">
-          <head>
-            <meta charset="UTF-8">
-            <title>SonarQube Report — {PROJECT}</title>
-            <style>
-              body{{font-family:Arial,sans-serif;margin:40px;background:#0f172a;color:#e2e8f0}}
-              h1{{color:#38bdf8}} h2{{color:#7dd3fc;border-bottom:1px solid #334155;padding-bottom:6px}}
-              .badge{{display:inline-block;padding:8px 24px;border-radius:8px;font-size:1.4em;font-weight:bold;background:{status_color};color:#fff}}
-              table{{border-collapse:collapse;width:100%;margin-bottom:24px}}
-              th{{background:#1e293b;padding:10px;text-align:left;color:#38bdf8}}
-              td{{padding:8px 10px;border-bottom:1px solid #1e293b}}
-              tr:hover td{{background:#1e293b}}
-              .meta{{background:#1e293b;border-radius:8px;padding:16px;margin-bottom:24px;display:grid;grid-template-columns:1fr 1fr}}
-              .meta span{{margin:4px 0;font-size:.95em}} .meta strong{{color:#38bdf8}}
-            </style>
-          </head>
-          <body>
-            <h1>📊 SonarQube Analysis Report</h1>
-            <div class="meta">
-              <span><strong>Project:</strong> {PROJECT}</span>
-              <span><strong>Branch:</strong> {BRANCH}</span>
-              <span><strong>Commit:</strong> {SHA}</span>
-              <span><strong>Author:</strong> {ACTOR}</span>
-              <span><strong>Run ID:</strong> {RUN_ID}</span>
-              <span><strong>Date:</strong> {now}</span>
-            </div>
-            <h2>Quality Gate</h2>
-            <p class="badge">{status_icon} {qg_status}</p>
-            <h2>Conditions</h2>
-            <table>
-              <thead><tr><th>Metric</th><th>Comparator</th><th>Threshold</th><th>Actual</th><th>Status</th></tr></thead>
-              <tbody>{cond_rows}</tbody>
-            </table>
-            <h2>Metrics Summary</h2>
-            <table>
-              <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-              <tbody>{metric_rows}</tbody>
-            </table>
-          </body></html>"""
+          report = f"""# 📊 Reporte de Análisis SonarQube — `{PROJECT}`
 
-          with open("sonarqube-report/report.html", "w") as f:
-              f.write(html)
+> **Rama:** `{BRANCH}` &nbsp;|&nbsp; **Commit:** [`{SHORT}`]({COMMIT_URL}) &nbsp;|&nbsp; **Autor:** `{ACTOR}` &nbsp;|&nbsp; **Fecha:** {NOW}
 
-          print(f"Report generated — Quality Gate: {qg_status}")
+---
+
+## {GATE_ICON} Quality Gate — {GATE_LABEL}
+
+{gate_msg}
+
+### Condiciones evaluadas (Quality Gate: StrictGate)
+
+| Estado | Métrica | Cond. | Umbral | Valor actual |
+|:------:|---------|:-----:|:------:|:------------:|
+{cond_rows}
+---
+
+## 📈 Resumen de Métricas
+
+| Categoría | Métrica | Valor |
+|-----------|---------|:-----:|
+| 📏 Tamaño | Líneas de código (NCLOC) | **{val('ncloc')}** |
+| 🐛 Confiabilidad | Bugs | **{val('bugs')}** |
+| 🔐 Seguridad | Vulnerabilidades | **{val('vulnerabilities')}** |
+| 🔐 Seguridad | Security Hotspots | **{val('security_hotspots')}** |
+| 🔐 Seguridad | Hotspots revisados (%) | **{val('security_hotspots_reviewed')}** |
+| 🧹 Mantenibilidad | Code Smells | **{val('code_smells')}** |
+| 🧹 Mantenibilidad | Deuda técnica (min) | **{val('sqale_index')}** |
+| 🧹 Mantenibilidad | Debt ratio (%) | **{val('sqale_debt_ratio')}** |
+| 🧪 Cobertura | Coverage (%) | **{val('coverage')}** |
+| 📋 Duplicación | Líneas duplicadas (%) | **{val('duplicated_lines_density')}** |
+| 🔁 Complejidad | Ciclomática | **{val('complexity')}** |
+| 🔁 Complejidad | Cognitiva | **{val('cognitive_complexity')}** |
+| 🚨 Issues | Blocker | **{val('blocker_violations')}** |
+| 🚨 Issues | Critical | **{val('critical_violations')}** |
+| 🚨 Issues | Major | **{val('major_violations')}** |
+
+---
+
+## ℹ️ Información del análisis
+
+| Campo | Valor |
+|-------|-------|
+| Proyecto | `{PROJECT}` |
+| Rama | `{BRANCH}` |
+| Commit | [`{SHORT}`]({COMMIT_URL}) |
+| Autor | `{ACTOR}` |
+| Repositorio | [{REPO}]({SERVER}/{REPO}) |
+| GitHub Actions Run | [Ver ejecución]({RUN_URL}) |
+| Fecha (UTC) | {NOW} |
+| SonarQube | 9.9.x Community Edition |
+
+---
+
+*Reporte generado automáticamente por `.github/workflows/sonarqube.yml`*
+"""
+
+          os.makedirs("sonarqube-report", exist_ok=True)
+
+          # Guardar como REPORTE.md (artefacto descargable)
+          with open("sonarqube-report/REPORTE.md", "w", encoding="utf-8") as f:
+              f.write(report)
+
+          # Escribir en el Job Summary de GitHub Actions (se renderiza en la UI)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary_path:
+              with open(summary_path, "w", encoding="utf-8") as f:
+                  f.write(report)
+
+          print(f"Reporte generado — Quality Gate: {GATE_LABEL}")
           PYEOF
 
-      - name: Upload SonarQube report artifact
+      - name: Upload REPORTE.md as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sonarqube-report-${{ github.run_id }}
-          path: sonarqube-report/
+          path: sonarqube-report/REPORTE.md
           retention-days: 14
