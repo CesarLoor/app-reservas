@@ -40,31 +40,40 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Wait for SonarQube
-        shell: bash
+      - name: Wait for SonarQube to be ready
         run: |
           echo "Waiting for SonarQube to be ready..."
-          for i in {1..30}; do
+          for i in {1..40}; do
             status=$(curl -s http://localhost:9000/api/system/status | grep -o '"status":"UP"' || true)
             if [ "$status" = '"status":"UP"' ]; then
+              echo "SonarQube is UP"
               exit 0
             fi
-            sleep 10
+            echo "Attempt $i/40 - not ready yet, waiting 15s..."
+            sleep 15
           done
           echo "SonarQube did not become ready in time"
           curl -s http://localhost:9000/api/system/status || true
           exit 1
 
-      - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v2
+      - name: Install sonar-scanner
+        run: |
+          SONAR_SCANNER_VERSION=5.0.1.3006
+          curl -sSLo sonar-scanner.zip \
+            "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux.zip"
+          unzip -q sonar-scanner.zip
+          echo "$PWD/sonar-scanner-${SONAR_SCANNER_VERSION}-linux/bin" >> $GITHUB_PATH
+
+      - name: Run SonarQube analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://localhost:9000
-        with:
-          args: >
-            -Dsonar.projectKey=app-reservas
-            -Dsonar.projectName=app-reservas
-            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
-            -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
-            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
+        run: |
+          sonar-scanner \
+            -Dsonar.host.url=http://localhost:9000 \
+            -Dsonar.login="${SONAR_TOKEN}" \
+            -Dsonar.projectKey=app-reservas \
+            -Dsonar.projectName=app-reservas \
+            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src \
+            -Dsonar.inclusions="**/*.js,**/*.jsx,**/*.ts,**/*.tsx" \
+            -Dsonar.exclusions="**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**" \
             -Dsonar.qualitygate.wait=true
