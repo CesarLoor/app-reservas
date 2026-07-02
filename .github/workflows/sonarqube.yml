@@ -62,6 +62,7 @@ jobs:
           SONAR_HOST_URL: http://localhost:9000
         with:
           args: >
+            -Dsonar.host.url=http://localhost:9000
             -Dsonar.projectKey=app-reservas
             -Dsonar.projectName=app-reservas
             -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
