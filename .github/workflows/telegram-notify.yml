@@ -36,7 +36,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           python3 << 'PYEOF'
-          import os, json, urllib.request, subprocess
+          import os, json, urllib.request, subprocess, html
 
           repo        = os.environ.get('REPO', '')
           branch      = os.environ.get('BRANCH', '')
@@ -68,35 +68,38 @@ jobs:
 
           commit_url = f"https://github.com/{repo}/commit/{sha}"
 
+          # Escapar caracteres especiales HTML en valores dinámicos
+          def e(s): return html.escape(str(s))
+
           if event == 'pull_request':
               pr_title = os.environ.get('PR_TITLE', '')
               pr_num   = os.environ.get('PR_NUM', '')
               pr_url   = os.environ.get('PR_URL', '')
               text = (
-                  f"🔀 *Pull Request #{pr_num}*\n\n"
-                  f"📌 *Repo:* {repo}\n"
-                  f"🌿 *Rama:* {branch}\n"
-                  f"👤 *Autor:* {author}\n"
-                  f"📝 *Titulo:* {pr_title}\n"
-                  f"📄 *Archivos:* {files}\n"
-                  f"🔗 [Ver PR]({pr_url})"
+                  f"🔀 <b>Pull Request #{e(pr_num)}</b>\n\n"
+                  f"📌 <b>Repo:</b> {e(repo)}\n"
+                  f"🌿 <b>Rama:</b> {e(branch)}\n"
+                  f"👤 <b>Autor:</b> {e(author)}\n"
+                  f"📝 <b>Titulo:</b> {e(pr_title)}\n"
+                  f"📄 <b>Archivos:</b>{e(files)}\n"
+                  f"🔗 <a href=\"{pr_url}\">Ver PR</a>"
               )
           else:
               text = (
-                  f"🚀 *Nuevo Push Detectado*\n\n"
-                  f"📌 *Repo:* {repo}\n"
-                  f"🌿 *Rama:* {branch}\n"
-                  f"👤 *Autor:* {author}\n"
-                  f"🔖 *Commit:* {short_sha}\n"
-                  f"💬 *Mensaje:* {commit_msg}\n"
-                  f"📄 *Archivos modificados:*{files}\n"
-                  f"🔗 [Ver commit]({commit_url})"
+                  f"🚀 <b>Nuevo Push Detectado</b>\n\n"
+                  f"📌 <b>Repo:</b> {e(repo)}\n"
+                  f"🌿 <b>Rama:</b> {e(branch)}\n"
+                  f"👤 <b>Autor:</b> {e(author)}\n"
+                  f"🔖 <b>Commit:</b> {e(short_sha)}\n"
+                  f"💬 <b>Mensaje:</b> {e(commit_msg)}\n"
+                  f"📄 <b>Archivos modificados:</b>{e(files)}\n"
+                  f"🔗 <a href=\"{commit_url}\">Ver commit</a>"
               )
 
           payload = json.dumps({
               "chat_id": chat_id,
               "text": text,
-              "parse_mode": "Markdown",
+              "parse_mode": "HTML",
               "disable_web_page_preview": False
           }).encode('utf-8')
 
