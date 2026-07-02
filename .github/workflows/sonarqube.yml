@@ -1,4 +1,4 @@
-name: SonarQube Backend Analysis
+name: SonarQube Project Analysis
 
 on:
   push:
@@ -9,8 +9,8 @@ on:
 
 jobs:
   scan:
-    name: Scan backend with SonarQube
-    runs-on: ubuntu-latest
+    name: Scan project with SonarQube
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository
@@ -22,12 +22,12 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: http://localhost:9001
         with:
           args: >
-            -Dsonar.projectKey=app-reservas-backend
-            -Dsonar.projectName=app-reservas-backend
-            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service
-            -Dsonar.inclusions=**/*.js
-            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,frontend/**,**/*.test.js,**/*.spec.js,.github/**
+            -Dsonar.projectKey=app-reservas
+            -Dsonar.projectName=app-reservas
+            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
+            -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
+            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
             -Dsonar.qualitygate.wait=true

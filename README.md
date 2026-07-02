@@ -29,6 +29,8 @@ reservas-ec/
 └── sonar-project.properties
 ```
 
+> El análisis de SonarQube cubre todo el proyecto: backend y frontend. El workflow de GitHub Actions usa un runner `self-hosted` en la misma máquina donde corre SonarQube, porque `localhost` no es accesible desde un runner hospedado por GitHub.
+
 ## Configuracion del entorno
 
 ### Variables de entorno
@@ -113,6 +115,8 @@ Con `sonar-scanner` instalado en tu maquina:
 sonar-scanner -Dsonar.host.url=http://localhost:9001 -Dsonar.login=<SONAR_TOKEN>
 ```
 
+Ese puerto y host son los mismos que usa el workflow del repositorio, siempre que el runner sea `self-hosted`.
+
 La configuracion base vive en `sonar-project.properties` y contiene `sonar.qualitygate.wait=true`, por lo que el analisis espera el resultado del Quality Gate.
 
 ### Pipeline GitHub Actions
@@ -128,9 +132,10 @@ Configura estos secretos en GitHub:
 | Secreto | Uso |
 | --- | --- |
 | `SONAR_TOKEN` | Token generado en SonarQube para ejecutar analisis |
-| `SONAR_HOST_URL` | URL del servidor SonarQube, por ejemplo `http://localhost:9001` si usas runner self-hosted o una URL publica accesible para GitHub Actions |
 
-Si SonarQube solo corre en tu PC como `localhost`, usa un runner self-hosted en esa misma maquina o publica temporalmente la instancia con una URL segura. Un runner hospedado por GitHub no puede acceder a tu `localhost`.
+El workflow usa `http://localhost:9001` directamente. Eso solo funciona si el runner es `self-hosted` y está ejecutándose en la misma máquina/red donde vive SonarQube.
+
+Si SonarQube solo corre en tu PC como `localhost`, usa un runner `self-hosted` en esa misma máquina o publica temporalmente la instancia con una URL segura. Un runner hospedado por GitHub no puede acceder a tu `localhost`.
 
 ## Notificaciones Telegram
 
@@ -171,7 +176,7 @@ La notificacion incluye autor, rama, enlace al commit y lista de archivos modifi
 
 Para completar la entrega academica, adjunta estas capturas despues de configurar tus secretos reales:
 
-1. SonarQube mostrando el proyecto `reservas-ec` con el Quality Gate `StrictGate` fallido. La consigna menciona `orders-service`, pero en este repositorio el servicio equivalente es `booking-service`.
+1. SonarQube mostrando el proyecto `app-reservas` con el Quality Gate `StrictGate` fallido. La consigna menciona `orders-service`, pero en este repositorio el servicio equivalente es `booking-service`.
 2. Grupo de Telegram mostrando una notificacion automatica generada por un commit en `main` o `develop`.
 
 No subas tokens, Chat IDs privados, capturas que muestren secretos, archivos `.env` ni credenciales reales. Usa `.env.example` como plantilla local.
