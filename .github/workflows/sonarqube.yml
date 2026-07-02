@@ -12,34 +12,59 @@ jobs:
     name: Scan project with SonarQube
     runs-on: ubuntu-latest
 
+    services:
+      sonarqube-db:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: sonar
+          POSTGRES_PASSWORD: sonar
+          POSTGRES_DB: sonarqube
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      sonarqube:
+        image: sonarqube:lts-community
+        ports:
+          - 9000:9000
+        env:
+          SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
+          SONAR_JDBC_USERNAME: sonar
+          SONAR_JDBC_PASSWORD: sonar
+        options: >-
+          --health-cmd "curl -s http://localhost:9000/api/system/status | grep -o '\"status\":\"UP\"'"
+          --health-interval 15s
+          --health-timeout 5s
+          --health-retries 15
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Start SonarQube stack
-        run: docker compose -f docker-compose.sonarqube.yml up -d
-
       - name: Wait for SonarQube
         shell: bash
         run: |
-          for i in {1..60}; do
-            status=$(curl -s http://localhost:9001/api/system/status | jq -r '.status' || true)
-            if [ "$status" = "UP" ]; then
+          echo "Waiting for SonarQube to be ready..."
+          for i in {1..30}; do
+            status=$(curl -s http://localhost:9000/api/system/status | grep -o '"status":"UP"' || true)
+            if [ "$status" = '"status":"UP"' ]; then
               exit 0
             fi
             sleep 10
           done
           echo "SonarQube did not become ready in time"
-          docker compose -f docker-compose.sonarqube.yml logs --no-color
+          curl -s http://localhost:9000/api/system/status || true
           exit 1
 
       - name: Run SonarQube scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://localhost:9001
+          SONAR_HOST_URL: http://localhost:9000
         with:
           args: >
             -Dsonar.projectKey=app-reservas
@@ -48,7 +73,3 @@ jobs:
             -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
             -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
             -Dsonar.qualitygate.wait=true
-
-      - name: Stop SonarQube stack
-        if: always()
-        run: docker compose -f docker-compose.sonarqube.yml down -v
