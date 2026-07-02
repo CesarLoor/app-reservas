@@ -187,5 +187,3 @@ El archivo del workflow está en: [`.github/workflows/telegram-notify.yml`](./.g
 Se ejecuta automáticamente en:
 - `push` a cualquier rama
 - `pull_request` a `main` o `develop`
-
-a
