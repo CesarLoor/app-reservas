@@ -1,21 +1,21 @@
 {
   "name": "StrictGate",
-  "isDefault": false,
+  "description": "Quality Gate estricto para el backend de app-reservas",
   "conditions": [
     {
-      "metric": "blocker_violations",
+      "metric": "blocker_issues",
       "op": "GT",
       "error": "0",
       "description": "Blocker Issues mayor a 0 → FALLA"
     },
     {
-      "metric": "critical_violations",
+      "metric": "critical_issues",
       "op": "GT",
       "error": "0",
       "description": "Critical Issues mayor a 0 → FALLA"
     },
     {
-      "metric": "major_violations",
+      "metric": "major_issues",
       "op": "GT",
       "error": "5",
       "description": "Major Issues mayor a 5 → FALLA"
@@ -56,6 +56,5 @@
       "error": "30",
       "description": "Complejidad cognitiva total mayor a 30 → FALLA"
     }
-  ],
-  "sonarqube_import_notes": "Para importar este Quality Gate en SonarQube: Administration → Quality Gates → Create 'StrictGate' → agregar cada condición manualmente según este JSON."
+  ]
 }

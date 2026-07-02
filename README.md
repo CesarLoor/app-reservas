@@ -79,64 +79,12 @@ La app estará disponible en http://localhost:3000
 ## ✅ Funcionalidades principales
 
 - Registro e inicio de sesión de usuarios
-
 - Perfil editable
-
 - Creación y cancelación de reservas
-
 - Historial de reservas activas y canceladas
-
 - Límite de 5 reservas canceladas visibles
-
 - Notificaciones por email (reserva y cancelación)
-
 - Gestión de microservicios independientes
-
----
-
-## 🔍 SonarQube — Quality Gates
-
-### Levantar SonarQube localmente (Docker)
-
-```bash
-docker run -d --name sonarqube \
-  -p 9000:9000 \
-  sonarqube:community
-```
-
-Acceder en: http://localhost:9000 (usuario/contraseña por defecto: `admin/admin`)
-
-### Ejecutar análisis manualmente
-
-```bash
-# Instalar sonar-scanner globalmente
-npm install -g sonar-scanner
-
-# Desde la raíz del proyecto
-sonar-scanner \
-  -Dsonar.projectKey=reservas-ec \
-  -Dsonar.sources=. \
-  -Dsonar.host.url=http://localhost:9000 \
-  -Dsonar.login=<TU_TOKEN_SONAR>
-```
-
-### Quality Gate — StrictGate
-
-El Quality Gate personalizado `StrictGate` está definido en [`qualitygate.json`](./qualitygate.json) con los siguientes umbrales:
-
-| Métrica                       | Condición       | Umbral |
-|-------------------------------|-----------------|--------|
-| Blocker Issues                | mayor que       | 0      |
-| Critical Issues               | mayor que       | 0      |
-| Major Issues                  | mayor que       | 5      |
-| Security Hotspots Reviewed    | menor que       | 100%   |
-| Coverage                      | menor que       | 80%    |
-| Duplicated Lines (%)          | mayor que       | 3%     |
-| Technical Debt Ratio          | mayor que       | 2.5%   |
-| Cyclomatic Complexity (total) | mayor que       | 50     |
-| Cognitive Complexity (total)  | mayor que       | 30     |
-
-> Para importar en SonarQube: **Administration → Quality Gates → Create** con nombre `StrictGate` y agregar cada condición según el archivo `qualitygate.json`.
 
 ---
 
@@ -186,4 +134,54 @@ El archivo del workflow está en: [`.github/workflows/telegram-notify.yml`](./.g
 
 Se ejecuta automáticamente en:
 - `push` a cualquier rama
+<<<<<<< HEAD
 - `pull_request` a `main` o `develop`
+=======
+- `pull_request` a `main` o `develop`
+
+---
+
+## 🔎 Calidad de código con SonarQube
+
+Este repositorio incluye una configuración local para analizar únicamente el backend con SonarQube Community Edition usando la imagen Docker que ya tienes en WSL Ubuntu: `sonarqube:9.9-community`.
+
+### 1. Levantar SonarQube localmente
+
+Desde WSL Ubuntu o desde una terminal con Docker disponible:
+
+```bash
+docker-compose -f docker-compose.sonar.yml up -d
+```
+
+El servidor quedará disponible en `http://localhost:9090`.
+
+### 2. Ejecutar el análisis manualmente
+
+El análisis toma como entrada el archivo `sonar-project.properties` ubicado en la raíz del repositorio.
+
+Si tienes instalado Sonar Scanner en tu entorno, ejecuta:
+
+```bash
+sonar-scanner -Dsonar.host.url=http://localhost:9090 -Dsonar.login=TU_TOKEN
+```
+
+Si prefieres usar Docker para el scanner, apunta el contenedor al mismo servidor local y monta el repositorio como volumen.
+
+### 3. StrictGate
+
+La definición del Quality Gate está documentada en `qualitygate.json`. El criterio es estricto y falla cuando aparecen problemas bloqueantes, deuda técnica alta, duplicación excesiva, cobertura baja o complejidad fuera de rango.
+
+### 4. Informe de problemas por módulo
+
+El detalle de hallazgos por servicio está en `backend-quality-report.md`.
+
+### 5. Evidencia del Quality Gate fallido
+
+El proyecto queda preparado para que el análisis falle con la configuración actual del backend. La evidencia esperada es la ejecución contra SonarQube local con StrictGate en estado `FAILED`.
+
+---
+
+## Notas de seguridad
+
+El archivo `docker-compose.yml` actual todavía contiene credenciales embebidas para los servicios de notificación y autenticación. SonarQube las detectará como deuda/vulnerabilidad y conviene migrarlas a variables de entorno o a un gestor de secretos.
+>>>>>>> d8afdbae13808f5b0bec758dd6c24b525e3070d3
