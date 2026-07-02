@@ -284,6 +284,23 @@ sonar-scanner -Dsonar.host.url=http://localhost:9090 -Dsonar.login=TU_TOKEN
 
 Si prefieres usar Docker para el scanner, apunta el contenedor al mismo servidor local y monta el repositorio como volumen.
 
+### 2.1 Secrets del workflow
+
+El workflow `.github/workflows/sonarqube.yml` usa estos secrets de GitHub Actions:
+
+| Secret | Uso |
+|---|---|
+| `SONAR_TOKEN` | Token generado en SonarQube para el usuario que ejecuta el análisis |
+| `SONAR_HOST_URL` | URL del servidor SonarQube local, en este caso `http://127.0.0.1:9090` |
+
+> No se debe guardar el token en el repositorio. Debe configurarse en `GitHub → Settings → Secrets and variables → Actions`.
+
+Si haces la prueba local con `sonar-scanner`, puedes usar directamente:
+
+```bash
+sonar-scanner -Dsonar.host.url=http://127.0.0.1:9090 -Dsonar.login=TU_TOKEN
+```
+
 ### 3. StrictGate
 
 La definición del Quality Gate está documentada en `qualitygate.json`. El criterio es estricto y falla cuando aparecen problemas bloqueantes, deuda técnica alta, duplicación excesiva, cobertura baja o complejidad fuera de rango.
