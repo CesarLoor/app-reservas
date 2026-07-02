@@ -148,11 +148,6 @@ El workflow `.github/workflows/telegram-notify.yml` envia una notificacion autom
 3. Crea el grupo del equipo e invita al bot.
 4. Envia un mensaje al grupo.
 5. Consulta el Chat ID con:
-
-```text
-https://api.telegram.org/bot<TOKEN>/getUpdates
-```
-
 ### Secretos de GitHub
 
 Configura estos secretos:
