@@ -10,13 +10,30 @@ on:
 jobs:
   scan:
     name: Scan project with SonarQube
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Start SonarQube stack
+        run: docker compose -f docker-compose.sonarqube.yml up -d
+
+      - name: Wait for SonarQube
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            status=$(curl -s http://localhost:9001/api/system/status | jq -r '.status' || true)
+            if [ "$status" = "UP" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "SonarQube did not become ready in time"
+          docker compose -f docker-compose.sonarqube.yml logs --no-color
+          exit 1
 
       - name: Run SonarQube scan
         uses: SonarSource/sonarqube-scan-action@v2
@@ -31,3 +48,7 @@ jobs:
             -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
             -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
             -Dsonar.qualitygate.wait=true
+
+      - name: Stop SonarQube stack
+        if: always()
+        run: docker compose -f docker-compose.sonarqube.yml down -v

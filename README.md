@@ -29,7 +29,7 @@ reservas-ec/
 └── sonar-project.properties
 ```
 
-> El análisis de SonarQube cubre todo el proyecto: backend y frontend. El workflow de GitHub Actions usa un runner `self-hosted` en la misma máquina donde corre SonarQube, porque `localhost` no es accesible desde un runner hospedado por GitHub.
+> El análisis de SonarQube cubre todo el proyecto: backend y frontend. Para que el workflow corra en GitHub Actions, `SONAR_HOST_URL` debe ser una URL accesible desde Internet o un túnel público. `localhost` solo sirve para pruebas manuales locales.
 
 ## Configuracion del entorno
 
@@ -115,7 +115,7 @@ Con `sonar-scanner` instalado en tu maquina:
 sonar-scanner -Dsonar.host.url=http://localhost:9001 -Dsonar.login=<SONAR_TOKEN>
 ```
 
-Ese puerto y host son los mismos que usa el workflow del repositorio, siempre que el runner sea `self-hosted`.
+Ese puerto y host solo aplican para pruebas manuales locales.
 
 La configuracion base vive en `sonar-project.properties` y contiene `sonar.qualitygate.wait=true`, por lo que el analisis espera el resultado del Quality Gate.
 
@@ -133,9 +133,7 @@ Configura estos secretos en GitHub:
 | --- | --- |
 | `SONAR_TOKEN` | Token generado en SonarQube para ejecutar analisis |
 
-El workflow usa `http://localhost:9001` directamente. Eso solo funciona si el runner es `self-hosted` y está ejecutándose en la misma máquina/red donde vive SonarQube.
-
-Si SonarQube solo corre en tu PC como `localhost`, usa un runner `self-hosted` en esa misma máquina o publica temporalmente la instancia con una URL segura. Un runner hospedado por GitHub no puede acceder a tu `localhost`.
+El workflow de GitHub Actions descarga las imagenes Docker, levanta SonarQube y PostgreSQL dentro del runner y ejecuta el analisis contra `http://localhost:9001` en ese mismo job remoto. No necesitas exponer SonarQube con una URL publica para el pipeline.
 
 ## Notificaciones Telegram
 
