@@ -86,3 +86,148 @@ jobs:
             -Dsonar.inclusions="**/*.js,**/*.jsx,**/*.ts,**/*.tsx" \
             -Dsonar.exclusions="**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**" \
             -Dsonar.qualitygate.wait=true
+
+      - name: Generate SonarQube report artifact
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import urllib.request, urllib.error, json, base64, datetime, os
+
+          BASE    = "http://localhost:9000"
+          PROJECT = "app-reservas"
+          TOKEN   = "${{ steps.sonar-token.outputs.token }}"
+          RUN_ID  = "${{ github.run_id }}"
+          SHA     = "${{ github.sha }}"[:7]
+          BRANCH  = "${{ github.ref_name }}"
+          ACTOR   = "${{ github.actor }}"
+
+          creds = base64.b64encode(f"{TOKEN}:".encode()).decode()
+          headers = {"Authorization": f"Basic {creds}"}
+
+          def api(path):
+              try:
+                  req = urllib.request.Request(f"{BASE}{path}", headers=headers)
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except Exception as e:
+                  return {"error": str(e)}
+
+          # Quality Gate status
+          qg = api(f"/api/qualitygates/project_status?projectKey={PROJECT}")
+          qg_status   = qg.get("projectStatus", {}).get("status", "UNKNOWN")
+          qg_conditions = qg.get("projectStatus", {}).get("conditions", [])
+
+          # Key metrics
+          metrics = [
+              "blocker_violations","critical_violations","major_violations",
+              "coverage","duplicated_lines_density","sqale_debt_ratio",
+              "complexity","cognitive_complexity","security_hotspots_reviewed",
+              "ncloc","bugs","vulnerabilities","code_smells","sqale_index"
+          ]
+          measures_resp = api(f"/api/measures/component?component={PROJECT}&metricKeys={','.join(metrics)}")
+          measures = {m["metric"]: m.get("value","N/A")
+                      for m in measures_resp.get("component", {}).get("measures", [])}
+
+          # Build report data
+          now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+          report = {
+              "project":         PROJECT,
+              "branch":          BRANCH,
+              "commit":          SHA,
+              "author":          ACTOR,
+              "run_id":          RUN_ID,
+              "timestamp":       now,
+              "quality_gate":    qg_status,
+              "conditions":      qg_conditions,
+              "metrics":         measures
+          }
+
+          os.makedirs("sonarqube-report", exist_ok=True)
+
+          # JSON report
+          with open("sonarqube-report/report.json", "w") as f:
+              json.dump(report, f, indent=2)
+
+          # HTML report
+          status_color = "#22c55e" if qg_status == "OK" else "#ef4444"
+          status_icon  = "✅" if qg_status == "OK" else "❌"
+
+          cond_rows = ""
+          for c in qg_conditions:
+              color = "#22c55e" if c.get("status") == "OK" else "#ef4444"
+              cond_rows += f"""
+              <tr>
+                <td>{c.get('metricKey','')}</td>
+                <td>{c.get('comparator','')}</td>
+                <td>{c.get('errorThreshold','')}</td>
+                <td>{c.get('actualValue','N/A')}</td>
+                <td style="color:{color};font-weight:bold">{c.get('status','')}</td>
+              </tr>"""
+
+          metric_labels = {
+              "ncloc":"Lines of Code","bugs":"Bugs","vulnerabilities":"Vulnerabilities",
+              "code_smells":"Code Smells","coverage":"Coverage (%)","duplicated_lines_density":"Duplicated Lines (%)",
+              "sqale_debt_ratio":"Tech Debt Ratio (%)","sqale_index":"Tech Debt (min)",
+              "complexity":"Cyclomatic Complexity","cognitive_complexity":"Cognitive Complexity",
+              "blocker_violations":"Blocker Issues","critical_violations":"Critical Issues",
+              "major_violations":"Major Issues","security_hotspots_reviewed":"Security Hotspots Reviewed (%)"
+          }
+          metric_rows = "".join(
+              f"<tr><td>{metric_labels.get(k,k)}</td><td><strong>{v}</strong></td></tr>"
+              for k,v in measures.items()
+          )
+
+          html = f"""<!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8">
+            <title>SonarQube Report — {PROJECT}</title>
+            <style>
+              body{{font-family:Arial,sans-serif;margin:40px;background:#0f172a;color:#e2e8f0}}
+              h1{{color:#38bdf8}} h2{{color:#7dd3fc;border-bottom:1px solid #334155;padding-bottom:6px}}
+              .badge{{display:inline-block;padding:8px 24px;border-radius:8px;font-size:1.4em;font-weight:bold;background:{status_color};color:#fff}}
+              table{{border-collapse:collapse;width:100%;margin-bottom:24px}}
+              th{{background:#1e293b;padding:10px;text-align:left;color:#38bdf8}}
+              td{{padding:8px 10px;border-bottom:1px solid #1e293b}}
+              tr:hover td{{background:#1e293b}}
+              .meta{{background:#1e293b;border-radius:8px;padding:16px;margin-bottom:24px;display:grid;grid-template-columns:1fr 1fr}}
+              .meta span{{margin:4px 0;font-size:.95em}} .meta strong{{color:#38bdf8}}
+            </style>
+          </head>
+          <body>
+            <h1>📊 SonarQube Analysis Report</h1>
+            <div class="meta">
+              <span><strong>Project:</strong> {PROJECT}</span>
+              <span><strong>Branch:</strong> {BRANCH}</span>
+              <span><strong>Commit:</strong> {SHA}</span>
+              <span><strong>Author:</strong> {ACTOR}</span>
+              <span><strong>Run ID:</strong> {RUN_ID}</span>
+              <span><strong>Date:</strong> {now}</span>
+            </div>
+            <h2>Quality Gate</h2>
+            <p class="badge">{status_icon} {qg_status}</p>
+            <h2>Conditions</h2>
+            <table>
+              <thead><tr><th>Metric</th><th>Comparator</th><th>Threshold</th><th>Actual</th><th>Status</th></tr></thead>
+              <tbody>{cond_rows}</tbody>
+            </table>
+            <h2>Metrics Summary</h2>
+            <table>
+              <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+              <tbody>{metric_rows}</tbody>
+            </table>
+          </body></html>"""
+
+          with open("sonarqube-report/report.html", "w") as f:
+              f.write(html)
+
+          print(f"Report generated — Quality Gate: {qg_status}")
+          PYEOF
+
+      - name: Upload SonarQube report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarqube-report-${{ github.run_id }}
+          path: sonarqube-report/
+          retention-days: 14
