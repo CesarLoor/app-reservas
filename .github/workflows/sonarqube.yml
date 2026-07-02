@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 name: SonarQube Quality Gate
+=======
+name: SonarQube Backend Analysis
+>>>>>>> c425dbfc93db2ce3aa6e800ea3539034af6b337b
 
 on:
   push:
@@ -8,8 +12,13 @@ on:
   pull_request:
 
 jobs:
+<<<<<<< HEAD
   sonarqube:
     name: Analyze code quality
+=======
+  scan:
+    name: Scan backend with SonarQube
+>>>>>>> c425dbfc93db2ce3aa6e800ea3539034af6b337b
     runs-on: ubuntu-latest
 
     steps:
@@ -18,6 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
+<<<<<<< HEAD
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -44,14 +54,27 @@ jobs:
 
       - name: Run SonarQube analysis
         uses: SonarSource/sonarqube-scan-action@v3
+=======
+      - name: Run SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v2
+>>>>>>> c425dbfc93db2ce3aa6e800ea3539034af6b337b
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           args: >
+<<<<<<< HEAD
             -Dsonar.projectKey=reservas-ec
             -Dsonar.projectName=ReservasEC
             -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
             -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/coverage/**,**/package-lock.json
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.qualitygate.wait=true
+=======
+            -Dsonar.projectKey=app-reservas-backend
+            -Dsonar.projectName=app-reservas-backend
+            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service
+            -Dsonar.inclusions=**/*.js
+            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,frontend/**,**/*.test.js,**/*.spec.js,.github/**
+            -Dsonar.qualitygate.wait=true
+>>>>>>> c425dbfc93db2ce3aa6e800ea3539034af6b337b

@@ -1,5 +1,6 @@
 {
   "name": "StrictGate",
+<<<<<<< HEAD
   "description": "Quality Gate restrictivo para el taller de SonarQube y Telegram en ReservasEC.",
   "conditions": [
     {
@@ -55,6 +56,63 @@
       "operator": "GT",
       "errorThreshold": "30",
       "description": "Cognitive Complexity total is greater than 30"
+=======
+  "description": "Quality Gate estricto para el backend de app-reservas",
+  "conditions": [
+    {
+      "metric": "blocker_issues",
+      "op": "GT",
+      "error": "0",
+      "description": "Blocker Issues mayor a 0 → FALLA"
+    },
+    {
+      "metric": "critical_issues",
+      "op": "GT",
+      "error": "0",
+      "description": "Critical Issues mayor a 0 → FALLA"
+    },
+    {
+      "metric": "major_issues",
+      "op": "GT",
+      "error": "5",
+      "description": "Major Issues mayor a 5 → FALLA"
+    },
+    {
+      "metric": "security_hotspots_reviewed",
+      "op": "LT",
+      "error": "100",
+      "description": "Security Hotspots Reviewed menor al 100% → FALLA"
+    },
+    {
+      "metric": "coverage",
+      "op": "LT",
+      "error": "80",
+      "description": "Cobertura menor al 80% → FALLA"
+    },
+    {
+      "metric": "duplicated_lines_density",
+      "op": "GT",
+      "error": "3",
+      "description": "Líneas duplicadas mayor al 3% → FALLA"
+    },
+    {
+      "metric": "sqale_debt_ratio",
+      "op": "GT",
+      "error": "2.5",
+      "description": "Technical Debt Ratio mayor al 2.5% → FALLA"
+    },
+    {
+      "metric": "complexity",
+      "op": "GT",
+      "error": "50",
+      "description": "Complejidad ciclomática total mayor a 50 → FALLA"
+    },
+    {
+      "metric": "cognitive_complexity",
+      "op": "GT",
+      "error": "30",
+      "description": "Complejidad cognitiva total mayor a 30 → FALLA"
+>>>>>>> c425dbfc93db2ce3aa6e800ea3539034af6b337b
     }
   ]
 }
