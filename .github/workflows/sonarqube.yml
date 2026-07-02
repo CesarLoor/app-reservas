@@ -44,17 +44,28 @@ jobs:
         run: |
           echo "Waiting for SonarQube to be ready..."
           for i in {1..40}; do
-            status=$(curl -s http://localhost:9000/api/system/status | grep -o '"status":"UP"' || true)
-            if [ "$status" = '"status":"UP"' ]; then
-              echo "SonarQube is UP"
+            STATUS=$(curl -s http://localhost:9000/api/system/status | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+            if [ "$STATUS" = "UP" ]; then
+              echo "SonarQube is UP after $i attempts"
               exit 0
             fi
-            echo "Attempt $i/40 - not ready yet, waiting 15s..."
+            echo "Attempt $i/40 — status: '$STATUS', waiting 15s..."
             sleep 15
           done
-          echo "SonarQube did not become ready in time"
-          curl -s http://localhost:9000/api/system/status || true
+          echo "SonarQube did not start in time"
           exit 1
+
+      - name: Generate SonarQube token for this run
+        id: sonar-token
+        run: |
+          # SonarQube starts with admin/admin on a fresh instance.
+          # We generate a temporary token so we never hardcode credentials.
+          RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" \
+            -u admin:admin \
+            --data-urlencode "name=ci-run-${{ github.run_id }}")
+          TOKEN=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "Token generated successfully"
 
       - name: Install sonar-scanner
         run: |
@@ -65,12 +76,10 @@ jobs:
           echo "$PWD/sonar-scanner-${SONAR_SCANNER_VERSION}-linux/bin" >> $GITHUB_PATH
 
       - name: Run SonarQube analysis
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           sonar-scanner \
             -Dsonar.host.url=http://localhost:9000 \
-            -Dsonar.login="${SONAR_TOKEN}" \
+            -Dsonar.login="${{ steps.sonar-token.outputs.token }}" \
             -Dsonar.projectKey=app-reservas \
             -Dsonar.projectName=app-reservas \
             -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src \
