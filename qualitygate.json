@@ -1,0 +1,60 @@
+{
+  "name": "StrictGate",
+  "description": "Quality Gate restrictivo para el taller de SonarQube y Telegram en ReservasEC.",
+  "conditions": [
+    {
+      "metric": "blocker_violations",
+      "operator": "GT",
+      "errorThreshold": "0",
+      "description": "Blocker Issues is greater than 0"
+    },
+    {
+      "metric": "critical_violations",
+      "operator": "GT",
+      "errorThreshold": "0",
+      "description": "Critical Issues is greater than 0"
+    },
+    {
+      "metric": "major_violations",
+      "operator": "GT",
+      "errorThreshold": "5",
+      "description": "Major Issues is greater than 5"
+    },
+    {
+      "metric": "security_hotspots_reviewed",
+      "operator": "LT",
+      "errorThreshold": "100",
+      "description": "Security Hotspots Reviewed is less than 100%"
+    },
+    {
+      "metric": "coverage",
+      "operator": "LT",
+      "errorThreshold": "80",
+      "description": "Coverage is less than 80%"
+    },
+    {
+      "metric": "duplicated_lines_density",
+      "operator": "GT",
+      "errorThreshold": "3",
+      "description": "Duplicated Lines (%) is greater than 3%"
+    },
+    {
+      "metric": "sqale_debt_ratio",
+      "operator": "GT",
+      "errorThreshold": "2.5",
+      "description": "Technical Debt Ratio is greater than 2.5%"
+    },
+    {
+      "metric": "complexity",
+      "operator": "GT",
+      "errorThreshold": "50",
+      "description": "Cyclomatic Complexity total is greater than 50"
+    },
+    {
+      "metric": "cognitive_complexity",
+      "operator": "GT",
+      "errorThreshold": "30",
+      "description": "Cognitive Complexity total is greater than 30"
+    }
+  ]
+}

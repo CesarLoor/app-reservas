@@ -1,93 +1,177 @@
-# 📆 ReservasEC
+# ReservasEC
 
-**ReservasEC** es una plataforma fullstack de gestión de reservas desarrollada con una arquitectura de microservicios. Permite a los usuarios registrarse, iniciar sesión, gestionar su perfil, crear y cancelar reservas, y recibir notificaciones. El sistema está dockerizado para facilitar el despliegue local.
+ReservasEC es una plataforma fullstack de gestion de reservas desarrollada con una arquitectura de microservicios. Permite a los usuarios registrarse, iniciar sesion, gestionar su perfil, crear y cancelar reservas, y recibir notificaciones. El sistema esta dockerizado para facilitar el despliegue local.
 
-## 🚀 Tecnologías principales
+## Tecnologias principales
 
-- **Frontend:** Next.js + Tailwind CSS
-- **Backend (Microservicios):**
-  - Auth Service (Node.js + Express)
-  - Booking Service (Node.js + Express)
-  - User Service (Node.js + Express)
-  - Notification Service (Node.js + Express + Nodemailer)
-- **Base de datos:** MongoDB
-- **Autenticación:** JSON Web Tokens (JWT)
-- **Contenedores:** Docker + Docker Compose
+- Frontend: Next.js + Tailwind CSS
+- Backend:
+  - Auth Service: Node.js + Express
+  - Booking Service: Node.js + Express
+  - User Service: Node.js + Express
+  - Notification Service: Node.js + Express + Nodemailer
+- Base de datos: MongoDB
+- Autenticacion: JSON Web Tokens
+- Contenedores: Docker + Docker Compose
 
----
+## Estructura de carpetas
 
-## 📁 Estructura de carpetas
-
-```plaintext
-/reservas-ec
-├── frontend/             # Next.js App
-├── auth-service/         # Servicio de autenticación
-├── user-service/         # Servicio de usuarios
-├── booking-service/      # Servicio de reservas
-├── notification-service/ # Servicio de notificaciones por email
-└── docker-compose.yml    # Orquestación de todos los servicios
+```text
+reservas-ec/
+├── frontend/
+├── auth-service/
+├── user-service/
+├── booking-service/
+├── notification-service/
+├── docker-compose.yml
+├── docker-compose.sonarqube.yml
+├── qualitygate.json
+└── sonar-project.properties
 ```
 
----
+## Configuracion del entorno
 
-## ⚙️ Configuración del entorno
+### Variables de entorno
 
-### 1. Clonar el repositorio
+Copia `.env.example` como `.env` y reemplaza los valores locales:
 
 ```bash
-git clone https://github.com/tu-usuario/reservas-ec.git
-cd reservas-ec
+cp .env.example .env
 ```
 
-### 2. Variables de entorno
+No subas archivos `.env` ni credenciales reales al repositorio.
 
-🔐 Frontend (frontend/.env.production.local)
+### Uso con Docker
+
+Construir los contenedores:
 
 ```bash
-NEXT_PUBLIC_API_URL=/api/auth
-NEXT_PUBLIC_BOOKING_URL=/api/bookings
-NEXT_PUBLIC_USER_URL=/api/users
+docker compose build
 ```
 
-🔐 Backend .env (cada microservicio)
-Ejemplo para auth-service:
+Levantar los servicios:
 
 ```bash
-PORT=4000
-MONGO_URI=mongodb://mongo:27017/auth-db
-JWT_SECRET=supersecretkey
+docker compose up
 ```
 
-Repite para los demás servicios cambiando PORT, MONGO_URI y usando el mismo JWT_SECRET.
+La app estara disponible en `http://localhost:3000`.
 
-### 3. 🐳 Uso con Docker
+## Funcionalidades principales
 
-1. Construir los contenedores
-
-```bash
-docker-compose build
-```
-
-3. Levantar los servicios
-
-```bash
-docker-compose up
-```
-
-La app estará disponible en http://localhost:3000
-
-## ✅ Funcionalidades principales
-
-- Registro e inicio de sesión de usuarios
-
+- Registro e inicio de sesion de usuarios
 - Perfil editable
-
-- Creación y cancelación de reservas
-
+- Creacion y cancelacion de reservas
 - Historial de reservas activas y canceladas
+- Limite de 5 reservas canceladas visibles
+- Notificaciones por email de reserva y cancelacion
+- Gestion de microservicios independientes
 
-- Límite de 5 reservas canceladas visibles
+## Quality Gate con SonarQube
 
-- Notificaciones por email (reserva y cancelación)
+Este repositorio incluye la configuracion solicitada para ejecutar analisis estatico con SonarQube Community Edition y bloquear integraciones cuando no se cumpla el Quality Gate `StrictGate`.
 
-- Gestión de microservicios independientes
+### Levantar SonarQube local
+
+```bash
+docker compose -f docker-compose.sonarqube.yml up -d
+```
+
+Luego ingresa a `http://localhost:9001`. El compose usa el puerto `9001` por defecto para evitar conflictos con otras instancias locales de SonarQube. Si quieres otro puerto, define `SONARQUBE_PORT` antes de levantar el servicio. En una instalacion nueva, SonarQube solicita iniciar sesion con `admin/admin` y cambiar la contrasena. Despues crea un token de analisis desde:
+
+```text
+My Account > Security > Generate Tokens
+```
+
+### Crear el Quality Gate StrictGate
+
+El archivo `qualitygate.json` documenta la configuracion exigida por el taller. Tambien se incluye un script para crearla por API en una instancia local:
+
+```powershell
+.\tools\sonarqube\create-strictgate.ps1 -SonarUrl "http://localhost:9001" -Token "<SONAR_TOKEN>"
+```
+
+Umbrales configurados:
+
+| Metrica | Condicion de fallo |
+| --- | --- |
+| Blocker Issues | mayor que 0 |
+| Critical Issues | mayor que 0 |
+| Major Issues | mayor que 5 |
+| Security Hotspots Reviewed | menor que 100% |
+| Coverage | menor que 80% |
+| Duplicated Lines (%) | mayor que 3% |
+| Technical Debt Ratio | mayor que 2.5% |
+| Cyclomatic Complexity total | mayor que 50 |
+| Cognitive Complexity total | mayor que 30 |
+
+### Analisis manual
+
+Con `sonar-scanner` instalado en tu maquina:
+
+```bash
+sonar-scanner -Dsonar.host.url=http://localhost:9001 -Dsonar.token=<SONAR_TOKEN>
+```
+
+La configuracion base vive en `sonar-project.properties` y contiene `sonar.qualitygate.wait=true`, por lo que el analisis espera el resultado del Quality Gate.
+
+### Pipeline GitHub Actions
+
+El workflow esta en `.github/workflows/sonarqube.yml` y se ejecuta en:
+
+- `push` a `main`
+- `push` a `develop`
+- `pull_request`
+
+Configura estos secretos en GitHub:
+
+| Secreto | Uso |
+| --- | --- |
+| `SONAR_TOKEN` | Token generado en SonarQube para ejecutar analisis |
+| `SONAR_HOST_URL` | URL del servidor SonarQube, por ejemplo `http://localhost:9001` si usas runner self-hosted o una URL publica accesible para GitHub Actions |
+
+Si SonarQube solo corre en tu PC como `localhost`, usa un runner self-hosted en esa misma maquina o publica temporalmente la instancia con una URL segura. Un runner hospedado por GitHub no puede acceder a tu `localhost`.
+
+## Notificaciones Telegram
+
+El workflow `.github/workflows/telegram-notify.yml` envia una notificacion automatica por cada `push` a `main` o `develop`.
+
+### Crear bot y obtener Chat ID
+
+1. En Telegram, abre `@BotFather` y ejecuta `/newbot`.
+2. Guarda el HTTP token del bot sin subirlo al repositorio.
+3. Crea el grupo del equipo e invita al bot.
+4. Envia un mensaje al grupo.
+5. Consulta el Chat ID con:
+
+```text
+https://api.telegram.org/bot<TOKEN>/getUpdates
+```
+
+### Secretos de GitHub
+
+Configura estos secretos:
+
+| Secreto | Uso |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Token HTTP entregado por BotFather |
+| `TELEGRAM_CHAT_ID` | Identificador del grupo donde se enviaran los mensajes |
+
+La notificacion incluye autor, rama, enlace al commit y lista de archivos modificados. El resultado de SonarQube queda enlazado al workflow de Quality Gate.
+
+## Roles del equipo
+
+| Rol | Responsable |
+| --- | --- |
+| Lider de calidad | Configura SonarQube, importa `StrictGate` y valida los umbrales |
+| DevOps | Mantiene los workflows de GitHub Actions y secretos de CI/Telegram |
+| Desarrolladores | Corrigen issues, duplicacion, cobertura y deuda tecnica reportados por SonarQube |
+
+## Evidencia funcional requerida
+
+Para completar la entrega academica, adjunta estas capturas despues de configurar tus secretos reales:
+
+1. SonarQube mostrando el proyecto `reservas-ec` con el Quality Gate `StrictGate` fallido. La consigna menciona `orders-service`, pero en este repositorio el servicio equivalente es `booking-service`.
+2. Grupo de Telegram mostrando una notificacion automatica generada por un commit en `main` o `develop`.
+
+No subas tokens, Chat IDs privados, capturas que muestren secretos, archivos `.env` ni credenciales reales. Usa `.env.example` como plantilla local.
