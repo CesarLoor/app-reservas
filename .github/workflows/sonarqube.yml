@@ -1,0 +1,33 @@
+name: SonarQube Backend Analysis
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  scan:
+    name: Scan backend with SonarQube
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=app-reservas-backend
+            -Dsonar.projectName=app-reservas-backend
+            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service
+            -Dsonar.inclusions=**/*.js
+            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,frontend/**,**/*.test.js,**/*.spec.js,.github/**
+            -Dsonar.qualitygate.wait=true
