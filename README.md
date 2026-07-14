@@ -95,17 +95,17 @@ El archivo `qualitygate.json` documenta la configuracion exigida por el taller. 
 
 Umbrales configurados:
 
-| Metrica | Condicion de fallo |
-| --- | --- |
-| Blocker Issues | mayor que 0 |
-| Critical Issues | mayor que 0 |
-| Major Issues | mayor que 5 |
-| Security Hotspots Reviewed | menor que 100% |
-| Coverage | menor que 80% |
-| Duplicated Lines (%) | mayor que 3% |
-| Technical Debt Ratio | mayor que 2.5% |
-| Cyclomatic Complexity total | mayor que 50 |
-| Cognitive Complexity total | mayor que 30 |
+| Metrica                     | Condicion de fallo |
+| --------------------------- | ------------------ |
+| Blocker Issues              | mayor que 0        |
+| Critical Issues             | mayor que 0        |
+| Major Issues                | mayor que 5        |
+| Security Hotspots Reviewed  | menor que 100%     |
+| Coverage                    | menor que 80%      |
+| Duplicated Lines (%)        | mayor que 3%       |
+| Technical Debt Ratio        | mayor que 2.5%     |
+| Cyclomatic Complexity total | mayor que 50       |
+| Cognitive Complexity total  | mayor que 30       |
 
 ### Analisis manual
 
@@ -127,15 +127,7 @@ El workflow esta en `.github/workflows/sonarqube.yml` y se ejecuta en:
 - `push` a `develop`
 - `pull_request`
 
-Configura estos secretos en GitHub:
-
-| Secreto | Uso |
-| --- | --- |
-| `SONAR_TOKEN` | Token generado en SonarQube para ejecutar analisis |
-
-> ⚠️ No subas el valor real del token al repositorio. En GitHub ve a **Settings → Secrets and variables → Actions** y crea el secreto `SONAR_TOKEN` con el token que generaste en SonarQube (ej. `sqp_...`).
-
-El workflow de GitHub Actions levanta SonarQube (`sonarqube:lts-community`) y PostgreSQL como service containers dentro del runner y ejecuta el analisis contra `http://localhost:9000`. No necesitas exponer SonarQube con una URL publica para el pipeline.
+El workflow de GitHub Actions descarga las imagenes Docker, levanta SonarQube y PostgreSQL dentro del runner y ejecuta el analisis contra `http://localhost:9000` en ese mismo job remoto. El token de analisis se genera dentro de esa instancia efimera antes de ejecutar el scanner, por lo que no necesitas crear un `SONAR_TOKEN` manual para este pipeline.
 
 ## Notificaciones Telegram
 
@@ -148,24 +140,25 @@ El workflow `.github/workflows/telegram-notify.yml` envia una notificacion autom
 3. Crea el grupo del equipo e invita al bot.
 4. Envia un mensaje al grupo.
 5. Consulta el Chat ID con:
+
 ### Secretos de GitHub
 
 Configura estos secretos:
 
-| Secreto | Uso |
-| --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Token HTTP entregado por BotFather |
-| `TELEGRAM_CHAT_ID` | Identificador del grupo donde se enviaran los mensajes |
+| Secreto                | Uso                                                    |
+| ---------------------- | ------------------------------------------------------ |
+| `TELEGRAM_BOT_TOKEN` | Token HTTP entregado por BotFather                     |
+| `TELEGRAM_CHAT_ID`   | Identificador del grupo donde se enviaran los mensajes |
 
 La notificacion incluye autor, rama, enlace al commit y lista de archivos modificados. El resultado de SonarQube queda enlazado al workflow de Quality Gate.
 
 ## Roles del equipo
 
-| Rol | Responsable |
-| --- | --- |
-| Lider de calidad | Configura SonarQube, importa `StrictGate` y valida los umbrales |
-| DevOps | Mantiene los workflows de GitHub Actions y secretos de CI/Telegram |
-| Desarrolladores | Corrigen issues, duplicacion, cobertura y deuda tecnica reportados por SonarQube |
+| Rol              | Responsable                                                                      |
+| ---------------- | -------------------------------------------------------------------------------- |
+| Lider de calidad | Configura SonarQube, importa`StrictGate` y valida los umbrales                 |
+| DevOps           | Mantiene los workflows de GitHub Actions y secretos de CI/Telegram               |
+| Desarrolladores  | Corrigen issues, duplicacion, cobertura y deuda tecnica reportados por SonarQube |
 
 ## Evidencia funcional requerida
 
