@@ -127,13 +127,9 @@ El workflow esta en `.github/workflows/sonarqube.yml` y se ejecuta en:
 - `push` a `develop`
 - `pull_request`
 
-Configura estos secretos en GitHub:
+El workflow de GitHub Actions descarga las imagenes Docker, levanta SonarQube y PostgreSQL dentro del runner y ejecuta el analisis contra `http://localhost:9000` en ese mismo job remoto. El token de analisis se genera dentro de esa instancia efimera antes de ejecutar el scanner, por lo que no necesitas crear un `SONAR_TOKEN` manual para este pipeline.
 
-| Secreto | Uso |
-| --- | --- |
-| `SONAR_TOKEN` | Token generado en SonarQube para ejecutar analisis |
-
-El workflow de GitHub Actions descarga las imagenes Docker, levanta SonarQube y PostgreSQL dentro del runner y ejecuta el analisis contra `http://localhost:9001` en ese mismo job remoto. No necesitas exponer SonarQube con una URL publica para el pipeline.
+Si el equipo decide usar un SonarQube persistente externo en lugar del contenedor efimero del runner, entonces si debe configurar `SONAR_TOKEN` como secret y apuntar el workflow a la URL publica de esa instancia.
 
 ## Notificaciones Telegram
 
