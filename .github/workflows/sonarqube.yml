@@ -40,67 +40,204 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Wait for SonarQube
-        shell: bash
+      - name: Wait for SonarQube to be ready
         run: |
           echo "Waiting for SonarQube to be ready..."
-          for i in {1..30}; do
-            status=$(curl -s http://localhost:9000/api/system/status | grep -o '"status":"UP"' || true)
-            if [ "$status" = '"status":"UP"' ]; then
+          for i in {1..40}; do
+            STATUS=$(curl -s http://localhost:9000/api/system/status \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+            if [ "$STATUS" = "UP" ]; then
+              echo "SonarQube is UP after $i attempts"
               exit 0
             fi
-            sleep 10
+            echo "Attempt $i/40 — status: '$STATUS', waiting 15s..."
+            sleep 15
           done
-          echo "SonarQube did not become ready in time"
-          curl -s http://localhost:9000/api/system/status || true
+          echo "SonarQube did not start in time"
           exit 1
 
-      - name: Create SonarQube token
+      - name: Generate SonarQube token for this run
         id: sonar-token
-        shell: bash
-        env:
-          SONAR_HOST_URL: http://localhost:9000
-          SONAR_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-SonarQube
         run: |
-          set -euo pipefail
+          RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" \
+            -u admin:admin \
+            --data-urlencode "name=ci-run-${{ github.run_id }}")
+          TOKEN=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "Token generated successfully"
 
-          curl -fsS -u admin:admin -X POST "${SONAR_HOST_URL}/api/users/change_password" \
-            -d "login=admin" \
-            -d "previousPassword=admin" \
-            -d "password=${SONAR_ADMIN_PASSWORD}" \
-            > /dev/null
-
-          token_response=$(curl -fsS -u "admin:${SONAR_ADMIN_PASSWORD}" -X POST "${SONAR_HOST_URL}/api/user_tokens/generate" \
-            --data-urlencode "name=github-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
-          sonar_token=$(echo "$token_response" | jq -r '.token')
-
-          if [ -z "$sonar_token" ] || [ "$sonar_token" = "null" ]; then
-            echo "Failed to generate SonarQube token"
-            exit 1
-          fi
-
-          echo "::add-mask::$sonar_token"
-          echo "SONAR_TOKEN=$sonar_token" >> "$GITHUB_ENV"
-
-      - name: Configure StrictGate
-        shell: pwsh
+      - name: Install sonar-scanner
         run: |
-          ./tools/sonarqube/create-strictgate.ps1 `
-            -SonarUrl "http://localhost:9000" `
-            -Token "$env:SONAR_TOKEN" `
-            -ProjectKey "app-reservas" `
-            -ProjectName "app-reservas"
+          SONAR_SCANNER_VERSION=5.0.1.3006
+          curl -sSLo sonar-scanner.zip \
+            "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux.zip"
+          unzip -q sonar-scanner.zip
+          echo "$PWD/sonar-scanner-${SONAR_SCANNER_VERSION}-linux/bin" >> $GITHUB_PATH
 
-      - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v7
-        env:
-          SONAR_HOST_URL: http://localhost:9000
-        with:
-          args: >
-            -Dsonar.host.url=http://localhost:9000
-            -Dsonar.projectKey=app-reservas
-            -Dsonar.projectName=app-reservas
-            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
-            -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
-            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
+      - name: Run SonarQube analysis
+        run: |
+          sonar-scanner \
+            -Dsonar.host.url=http://localhost:9000 \
+            -Dsonar.login="${{ steps.sonar-token.outputs.token }}" \
+            -Dsonar.projectKey=app-reservas \
+            -Dsonar.projectName=app-reservas \
+            -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src \
+            -Dsonar.inclusions="**/*.js,**/*.jsx,**/*.ts,**/*.tsx" \
+            -Dsonar.exclusions="**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**" \
             -Dsonar.qualitygate.wait=true
+
+      - name: Generate SonarQube Markdown report
+        if: always()
+        env:
+          SONAR_TOKEN_CI: ${{ steps.sonar-token.outputs.token }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_SHA: ${{ github.sha }}
+          GH_BRANCH: ${{ github.ref_name }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_SERVER: ${{ github.server_url }}
+        run: |
+          python3 - << 'PYEOF'
+          import urllib.request, json, base64, datetime, os
+
+          BASE    = "http://localhost:9000"
+          PROJECT = "app-reservas"
+          TOKEN   = os.environ["SONAR_TOKEN_CI"]
+          RUN_ID  = os.environ["GH_RUN_ID"]
+          SHA     = os.environ["GH_SHA"]
+          SHORT   = SHA[:7]
+          BRANCH  = os.environ["GH_BRANCH"]
+          ACTOR   = os.environ["GH_ACTOR"]
+          REPO    = os.environ["GH_REPO"]
+          SERVER  = os.environ["GH_SERVER"]
+          NOW     = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          COMMIT_URL = "{}/{}/commit/{}".format(SERVER, REPO, SHA)
+          RUN_URL    = "{}/{}/actions/runs/{}".format(SERVER, REPO, RUN_ID)
+
+          creds   = base64.b64encode("{}:".format(TOKEN).encode()).decode()
+          headers = {"Authorization": "Basic {}".format(creds)}
+
+          def api(path):
+              try:
+                  req = urllib.request.Request("{}{}".format(BASE, path), headers=headers)
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except Exception as e:
+                  return {"error": str(e)}
+
+          qg_resp       = api("/api/qualitygates/project_status?projectKey={}".format(PROJECT))
+          qg_status     = qg_resp.get("projectStatus", {}).get("status", "UNKNOWN")
+          qg_conditions = qg_resp.get("projectStatus", {}).get("conditions", [])
+
+          metric_keys = [
+              "ncloc","bugs","vulnerabilities","code_smells","coverage",
+              "duplicated_lines_density","sqale_debt_ratio","sqale_index",
+              "complexity","cognitive_complexity",
+              "blocker_violations","critical_violations","major_violations",
+              "security_hotspots","security_hotspots_reviewed"
+          ]
+          m_resp   = api("/api/measures/component?component={}&metricKeys={}".format(PROJECT, ",".join(metric_keys)))
+          measures = {m["metric"]: m.get("value", "N/A")
+                      for m in m_resp.get("component", {}).get("measures", [])}
+
+          def v(k):
+              return measures.get(k, "N/A")
+
+          PASSED     = qg_status == "OK"
+          GATE_ICON  = "PASSED" if PASSED else "FAILED"
+          CMP        = {"GT": ">", "LT": "<", "EQ": "=", "NE": "!="}
+
+          L = []
+          L.append("# Reporte de Analisis SonarQube - {}".format(PROJECT))
+          L.append("")
+          L.append("**Rama:** {} | **Commit:** [{}]({}) | **Autor:** {} | **Fecha:** {}".format(
+              BRANCH, SHORT, COMMIT_URL, ACTOR, NOW))
+          L.append("")
+          L.append("---")
+          L.append("")
+          if PASSED:
+              L.append("## Quality Gate - {} PASSED".format(PROJECT))
+              L.append("")
+              L.append("> El codigo cumple todos los umbrales del Quality Gate StrictGate.")
+          else:
+              L.append("## Quality Gate - FAILED")
+              L.append("")
+              L.append("> El codigo NO cumple los umbrales del Quality Gate StrictGate. Revisa las condiciones fallidas.")
+          L.append("")
+          L.append("### Condiciones evaluadas (StrictGate)")
+          L.append("")
+          L.append("| Estado | Metrica | Condicion | Umbral | Valor actual |")
+          L.append("|:------:|---------|:---------:|:------:|:------------:|")
+          for c in qg_conditions:
+              icon = "OK" if c.get("status") == "OK" else "FAIL"
+              L.append("| {} | `{}` | {} | `{}` | **{}** |".format(
+                  icon,
+                  c.get("metricKey", ""),
+                  CMP.get(c.get("comparator", ""), c.get("comparator", "")),
+                  c.get("errorThreshold", "N/A"),
+                  c.get("actualValue", "N/A")
+              ))
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append("## Resumen de Metricas")
+          L.append("")
+          L.append("| Categoria | Metrica | Valor |")
+          L.append("|-----------|---------|:-----:|")
+          L.append("| Tamano | Lineas de codigo (NCLOC) | **{}** |".format(v("ncloc")))
+          L.append("| Confiabilidad | Bugs | **{}** |".format(v("bugs")))
+          L.append("| Seguridad | Vulnerabilidades | **{}** |".format(v("vulnerabilities")))
+          L.append("| Seguridad | Security Hotspots | **{}** |".format(v("security_hotspots")))
+          L.append("| Seguridad | Hotspots revisados (%) | **{}** |".format(v("security_hotspots_reviewed")))
+          L.append("| Mantenibilidad | Code Smells | **{}** |".format(v("code_smells")))
+          L.append("| Mantenibilidad | Deuda tecnica (min) | **{}** |".format(v("sqale_index")))
+          L.append("| Mantenibilidad | Debt ratio (%) | **{}** |".format(v("sqale_debt_ratio")))
+          L.append("| Cobertura | Coverage (%) | **{}** |".format(v("coverage")))
+          L.append("| Duplicacion | Lineas duplicadas (%) | **{}** |".format(v("duplicated_lines_density")))
+          L.append("| Complejidad | Ciclomatica | **{}** |".format(v("complexity")))
+          L.append("| Complejidad | Cognitiva | **{}** |".format(v("cognitive_complexity")))
+          L.append("| Issues | Blocker | **{}** |".format(v("blocker_violations")))
+          L.append("| Issues | Critical | **{}** |".format(v("critical_violations")))
+          L.append("| Issues | Major | **{}** |".format(v("major_violations")))
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append("## Informacion del analisis")
+          L.append("")
+          L.append("| Campo | Valor |")
+          L.append("|-------|-------|")
+          L.append("| Proyecto | `{}` |".format(PROJECT))
+          L.append("| Rama | `{}` |".format(BRANCH))
+          L.append("| Commit | [{}]({}) |".format(SHORT, COMMIT_URL))
+          L.append("| Autor | `{}` |".format(ACTOR))
+          L.append("| Repositorio | [{0}]({1}/{0}) |".format(REPO, SERVER))
+          L.append("| GitHub Actions Run | [Ver ejecucion]({}) |".format(RUN_URL))
+          L.append("| Fecha (UTC) | {} |".format(NOW))
+          L.append("| SonarQube | 9.9.x Community Edition |")
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append("*Reporte generado automaticamente por `.github/workflows/sonarqube.yml`*")
+
+          report = "\n".join(L)
+
+          os.makedirs("sonarqube-report", exist_ok=True)
+          with open("sonarqube-report/REPORTE.md", "w", encoding="utf-8") as fh:
+              fh.write(report)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary:
+              with open(summary, "w", encoding="utf-8") as fh:
+                  fh.write(report)
+
+          print("Reporte generado — Quality Gate: {}".format(GATE_ICON))
+          PYEOF
+
+      - name: Upload REPORTE.md as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarqube-report-${{ github.run_id }}
+          path: sonarqube-report/REPORTE.md
+          retention-days: 14
