@@ -1,0 +1,23 @@
+# Reglas ZAP para el scan del Frontend
+# Formato: <alertId>	<IGNORE|WARN|FAIL>	<optional-comment>
+#
+# IDs de alertas comunes:
+#   10015  Incomplete or No Cache-control Header
+#   10016  Web Browser XSS Protection Not Enabled
+#   10017  Cross-Domain JavaScript Source File Inclusion
+#   10019  Content-Type Header Missing
+#   10020  X-Frame-Options Header
+#   10021  X-Content-Type-Options Header Missing
+#   10023  Information Disclosure - Debug Error Messages
+#   10035  Strict-Transport-Security Header
+#   10036  HTTP Server Response Header
+#   10054  Cookie without SameSite Attribute
+#   10063  Permissions Policy Header Not Set
+#   10098  Cross-Domain Misconfiguration
+#   10202  Absence of Anti-CSRF Tokens
+
+# Ignorar alertas de bajo riesgo en desarrollo local
+10016	IGNORE	XSS Protection header — gestionado por Next.js headers config
+10035	IGNORE	HSTS no aplica en HTTP local (solo en HTTPS producción)
+10036	WARN	Server header expuesto — considerar ocultarlo en producción
+10063	WARN	Permissions-Policy — agregar en next.config.ts para producción

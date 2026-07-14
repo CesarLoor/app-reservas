@@ -1,0 +1,229 @@
+name: DAST - OWASP ZAP Security Scan
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      zap_fail_on_warn:
+        description: "Fallar el pipeline si ZAP detecta alertas HIGH/CRITICAL"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  dast-scan:
+    name: DAST con OWASP ZAP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      # ─────────────────────────────────────────────
+      # 1. Levantar todos los servicios
+      # ─────────────────────────────────────────────
+      - name: Levantar servicios con Docker Compose
+        run: |
+          docker compose up -d --build
+          echo "Servicios iniciados"
+
+      - name: Esperar que los servicios estén healthy
+        run: |
+          echo "Esperando servicios..."
+          for i in $(seq 1 30); do
+            FRONTEND=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
+            AUTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/register || echo "000")
+            BOOKING=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/bookings || echo "000")
+            USER=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5003/users/me || echo "000")
+
+            echo "Intento $i/30 — Frontend: $FRONTEND | Auth: $AUTH | Booking: $BOOKING | User: $USER"
+
+            if [ "$FRONTEND" != "000" ] && [ "$AUTH" != "000" ]; then
+              echo "Servicios principales listos después de $i intentos"
+              break
+            fi
+            sleep 5
+          done
+
+      # ─────────────────────────────────────────────
+      # 2. ZAP — Baseline scan sobre el Frontend
+      #    (pasivo: spider + análisis de respuestas)
+      # ─────────────────────────────────────────────
+      - name: ZAP Baseline Scan — Frontend (puerto 3000)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost:3000"
+          rules_file_name: ".zap/rules-frontend.tsv"
+          cmd_options: "-a -j"
+          fail_action: false
+          artifact_name: "zap-frontend"
+        continue-on-error: true
+
+      # ─────────────────────────────────────────────
+      # 3. ZAP — API Scan sobre Auth Service
+      # ─────────────────────────────────────────────
+      - name: ZAP API Scan — Auth Service (puerto 4000)
+        uses: zaproxy/action-api-scan@v0.7.0
+        with:
+          target: "http://localhost:4000"
+          format: "openapi"
+          cmd_options: "-a"
+          fail_action: false
+          artifact_name: "zap-auth-service"
+        continue-on-error: true
+
+      # ─────────────────────────────────────────────
+      # 4. ZAP — API Scan sobre Booking Service
+      # ─────────────────────────────────────────────
+      - name: ZAP API Scan — Booking Service (puerto 5000)
+        uses: zaproxy/action-api-scan@v0.7.0
+        with:
+          target: "http://localhost:5000"
+          format: "openapi"
+          cmd_options: "-a"
+          fail_action: false
+          artifact_name: "zap-booking-service"
+        continue-on-error: true
+
+      # ─────────────────────────────────────────────
+      # 5. ZAP — API Scan sobre User Service
+      # ─────────────────────────────────────────────
+      - name: ZAP API Scan — User Service (puerto 5003)
+        uses: zaproxy/action-api-scan@v0.7.0
+        with:
+          target: "http://localhost:5003"
+          format: "openapi"
+          cmd_options: "-a"
+          fail_action: false
+          artifact_name: "zap-user-service"
+        continue-on-error: true
+
+      # ─────────────────────────────────────────────
+      # 6. Consolidar reportes en Markdown
+      # ─────────────────────────────────────────────
+      - name: Generar reporte DAST consolidado
+        if: always()
+        env:
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_SHA: ${{ github.sha }}
+          GH_BRANCH: ${{ github.ref_name }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_SERVER: ${{ github.server_url }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, json, datetime, glob
+
+          RUN_ID = os.environ.get("GH_RUN_ID", "local")
+          SHA    = os.environ.get("GH_SHA", "local")
+          SHORT  = SHA[:7]
+          BRANCH = os.environ.get("GH_BRANCH", "local")
+          ACTOR  = os.environ.get("GH_ACTOR", "local")
+          REPO   = os.environ.get("GH_REPO", "local")
+          SERVER = os.environ.get("GH_SERVER", "https://github.com")
+          NOW    = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          COMMIT_URL = f"{SERVER}/{REPO}/commit/{SHA}"
+          RUN_URL    = f"{SERVER}/{REPO}/actions/runs/{RUN_ID}"
+
+          L = []
+          L.append("# Reporte DAST - OWASP ZAP - app-reservas")
+          L.append("")
+          L.append(f"**Rama:** {BRANCH} | **Commit:** [{SHORT}]({COMMIT_URL}) | **Autor:** {ACTOR} | **Fecha:** {NOW}")
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append("## Servicios escaneados")
+          L.append("")
+          L.append("| Servicio | URL | Tipo de scan |")
+          L.append("|---|---|---|")
+          L.append("| Frontend (Next.js) | http://localhost:3000 | Baseline (spider + pasivo) |")
+          L.append("| Auth Service | http://localhost:4000 | API Scan |")
+          L.append("| Booking Service | http://localhost:5000 | API Scan |")
+          L.append("| User Service | http://localhost:5003 | API Scan |")
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append("## Resultados por servicio")
+          L.append("")
+
+          # Buscar reportes JSON generados por ZAP
+          report_files = glob.glob("**/zap_report*.json", recursive=True) + \
+                         glob.glob("**/*zap*.json", recursive=True)
+
+          if report_files:
+              for rf in report_files:
+                  try:
+                      with open(rf) as f:
+                          data = json.load(f)
+                      alerts = data.get("alerts", data.get("site", [{}])[0].get("alerts", []) if isinstance(data.get("site"), list) else [])
+                      high   = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("3", "High")))
+                      medium = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("2", "Medium")))
+                      low    = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("1", "Low")))
+                      L.append(f"### `{rf}`")
+                      L.append(f"- 🔴 HIGH: **{high}**")
+                      L.append(f"- 🟡 MEDIUM: **{medium}**")
+                      L.append(f"- 🟢 LOW: **{low}**")
+                      L.append("")
+                  except Exception as e:
+                      L.append(f"### `{rf}` — Error al parsear: {e}")
+                      L.append("")
+          else:
+              L.append("> Los reportes individuales están disponibles como artifacts de GitHub Actions.")
+              L.append("> Descarga los artifacts `zap-frontend`, `zap-auth-service`, `zap-booking-service`, `zap-user-service`.")
+              L.append("")
+
+          L.append("---")
+          L.append("")
+          L.append("## Tipos de vulnerabilidades que ZAP detecta")
+          L.append("")
+          L.append("| Categoría | Ejemplos |")
+          L.append("|---|---|")
+          L.append("| Inyección | SQL Injection, Command Injection, LDAP Injection |")
+          L.append("| XSS | Reflected XSS, Stored XSS, DOM XSS |")
+          L.append("| Cabeceras inseguras | Missing HSTS, X-Frame-Options, CSP |")
+          L.append("| Autenticación | Credenciales por defecto, session fixation |")
+          L.append("| Información expuesta | Stack traces, versiones, paths internos |")
+          L.append("| CORS mal configurado | Wildcards en Access-Control-Allow-Origin |")
+          L.append("")
+          L.append("---")
+          L.append("")
+          L.append(f"*Reporte generado automáticamente por `.github/workflows/dast.yml` — [Ver ejecución]({RUN_URL})*")
+
+          report = "\n".join(L)
+          os.makedirs("dast-report", exist_ok=True)
+          with open("dast-report/REPORTE-DAST.md", "w", encoding="utf-8") as fh:
+              fh.write(report)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary:
+              with open(summary, "w", encoding="utf-8") as fh:
+                  fh.write(report)
+
+          print("Reporte DAST generado exitosamente")
+          PYEOF
+
+      # ─────────────────────────────────────────────
+      # 7. Subir reporte consolidado
+      # ─────────────────────────────────────────────
+      - name: Subir reporte DAST consolidado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-report-${{ github.run_id }}
+          path: dast-report/REPORTE-DAST.md
+          retention-days: 30
+
+      # ─────────────────────────────────────────────
+      # 8. Apagar servicios
+      # ─────────────────────────────────────────────
+      - name: Detener servicios
+        if: always()
+        run: docker compose down

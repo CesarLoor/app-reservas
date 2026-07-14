@@ -2,9 +2,16 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
+ARG NEXT_PUBLIC_API_URL=/api/auth
+ARG NEXT_PUBLIC_BOOKING_URL=/api/bookings
+ARG NEXT_PUBLIC_USER_URL=/api/users
+
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_BOOKING_URL=$NEXT_PUBLIC_BOOKING_URL
+ENV NEXT_PUBLIC_USER_URL=$NEXT_PUBLIC_USER_URL
+
 COPY package.json package-lock.json* ./
 COPY . .
-COPY .env.production.local .env.production.local
 
 RUN npm install
 RUN npm run build

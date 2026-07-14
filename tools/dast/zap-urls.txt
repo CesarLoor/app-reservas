@@ -1,0 +1,19 @@
+# URLs objetivo para ZAP DAST scan
+# Formato: una URL por línea
+
+# Frontend
+http://frontend:3000
+http://frontend:3000/login
+http://frontend:3000/register
+http://frontend:3000/dashboard
+
+# Auth Service
+http://auth-service:4000/api/register
+http://auth-service:4000/api/login
+
+# Booking Service
+http://booking-service:5000/bookings
+
+# User Service
+http://user-service:5003/users/me
+http://user-service:5003/users/me/update
