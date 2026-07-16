@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-isolation=none",
+    "test:coverage": "c8 --reporter=text --reporter=lcov --all --include=controllers/**/*.js --include=routes/**/*.js --include=services/**/*.js --exclude=**/*.test.js node --test --test-isolation=none && node ../tools/lcov/prefix-lcov-paths.js coverage/lcov.info notification-service"
   },
   "keywords": [],
   "author": "",
@@ -14,5 +15,8 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "nodemailer": "^7.0.3"
+  },
+  "devDependencies": {
+    "c8": "^11.0.0"
   }
 }

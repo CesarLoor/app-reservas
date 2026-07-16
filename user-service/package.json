@@ -3,7 +3,9 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
-        "start": "node index.js"
+        "start": "node index.js",
+        "test": "node --test --test-isolation=none",
+        "test:coverage": "c8 --reporter=text --reporter=lcov --all --include=routes/**/*.js --include=middleware/**/*.js --include=models/**/*.js --exclude=**/*.test.js node --test --test-isolation=none && node ../tools/lcov/prefix-lcov-paths.js coverage/lcov.info user-service"
     },
     "dependencies": {
         "cors": "^2.8.5",
@@ -12,5 +14,8 @@
         "joi": "^17.13.3",
         "jsonwebtoken": "^9.0.2",
         "mongoose": "^7.6.3"
+    },
+    "devDependencies": {
+        "c8": "^11.0.0"
     }
 }

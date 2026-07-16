@@ -40,6 +40,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies and generate coverage
+        shell: bash
+        run: |
+          for package_dir in auth-service booking-service notification-service user-service frontend; do
+            npm ci --prefix "$package_dir"
+            npm run test:coverage --prefix "$package_dir"
+          done
+
       - name: Wait for SonarQube
         shell: bash
         run: |
@@ -68,4 +81,6 @@ jobs:
             -Dsonar.sources=auth-service/src,booking-service/src,notification-service,user-service,frontend/src
             -Dsonar.inclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx
             -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/*.test.js,**/*.spec.js,.github/**
+            -Dsonar.coverage.exclusions=auth-service/src/app.js,booking-service/src/app.js,notification-service/index.js,user-service/index.js,frontend/src/**/*.tsx,frontend/src/types.ts
+            -Dsonar.javascript.lcov.reportPaths=auth-service/coverage/lcov.info,booking-service/coverage/lcov.info,notification-service/coverage/lcov.info,user-service/coverage/lcov.info,frontend/coverage/lcov.info
             -Dsonar.qualitygate.wait=true

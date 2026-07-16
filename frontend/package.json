@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --no-warnings --experimental-strip-types --test --test-isolation=none",
+    "test:coverage": "c8 --reporter=text --reporter=lcov --all --extension=.ts --include=src/**/*.ts --exclude=src/**/*.test.ts --exclude=src/types.ts node --no-warnings --experimental-strip-types --test --test-isolation=none && node ../tools/lcov/prefix-lcov-paths.js coverage/lcov.info frontend"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
@@ -22,6 +24,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "c8": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "15.3.3",
     "tailwindcss": "^4",

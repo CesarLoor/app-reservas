@@ -4,8 +4,9 @@
   "description": "",
   "main": "src/app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/app.js"
+    "test": "node --test --test-isolation=none",
+    "dev": "nodemon src/app.js",
+    "test:coverage": "c8 --reporter=text --reporter=lcov --all --include=src/**/*.js --exclude=src/app.js --exclude=src/**/*.test.js node --test --test-isolation=none && node ../tools/lcov/prefix-lcov-paths.js coverage/lcov.info auth-service"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {
+    "c8": "^11.0.0",
     "nodemon": "^3.1.10"
   }
 }

@@ -3,7 +3,9 @@
     "version": "1.0.0",
     "main": "src/app.js",
     "scripts": {
-        "dev": "nodemon src/app.js"
+        "dev": "nodemon src/app.js",
+        "test": "node --test --test-isolation=none",
+        "test:coverage": "c8 --reporter=text --reporter=lcov --all --include=src/**/*.js --exclude=src/app.js --exclude=src/**/*.test.js node --test --test-isolation=none && node ../tools/lcov/prefix-lcov-paths.js coverage/lcov.info booking-service"
     },
     "dependencies": {
         "axios": "^1.10.0",
@@ -18,6 +20,7 @@
         "nodemailer": "^7.0.3"
     },
     "devDependencies": {
+        "c8": "^11.0.0",
         "nodemon": "^3.1.10"
     }
 }
