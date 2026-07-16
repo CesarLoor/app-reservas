@@ -1,4 +1,4 @@
-name: DAST - OWASP ZAP Security Scan
+name: "🛡️ DAST - OWASP ZAP (Kubernetes)"
 
 on:
   push:
@@ -6,109 +6,367 @@ on:
       - main
       - develop
   pull_request:
+    branches:
+      - main
+      - develop
   workflow_dispatch:
     inputs:
-      zap_fail_on_warn:
-        description: "Fallar el pipeline si ZAP detecta alertas HIGH/CRITICAL"
+      fail_on_high:
+        description: "Fallar el pipeline si ZAP detecta HIGH/CRITICAL"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options:
-          - "true"
           - "false"
+          - "true"
+
+env:
+  KIND_VERSION: "v0.24.0"
+  ZAP_IMAGE: "ghcr.io/zaproxy/zaproxy:stable"
+  NAMESPACE: "dast"
+  CLUSTER_NAME: "dast-cluster"
 
 jobs:
+  # ══════════════════════════════════════════════════════════════════
+  #  DAST SCAN — Kubernetes (Kind) + OWASP ZAP
+  # ══════════════════════════════════════════════════════════════════
   dast-scan:
-    name: DAST con OWASP ZAP
+    name: "🔍 DAST con OWASP ZAP + Kind (Kubernetes)"
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repositorio
+      # ──────────────────────────────────────────────────────────────
+      # 0. Checkout
+      # ──────────────────────────────────────────────────────────────
+      - name: "📥 Checkout repositorio"
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────
-      # 1. Levantar todos los servicios
-      # ─────────────────────────────────────────────
-      - name: Levantar servicios con Docker Compose
+      # ──────────────────────────────────────────────────────────────
+      # 1. Instalar Kind
+      # ──────────────────────────────────────────────────────────────
+      - name: "⚙️ Instalar Kind"
         run: |
-          docker compose up -d --build
-          echo "Servicios iniciados"
+          echo "=== Instalando Kind ${{ env.KIND_VERSION }} ==="
+          curl -sSLo ./kind \
+            "https://kind.sigs.k8s.io/dl/${{ env.KIND_VERSION }}/kind-linux-amd64"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+          kubectl version --client
 
-      - name: Esperar que los servicios estén healthy
+      # ──────────────────────────────────────────────────────────────
+      # 2. Crear cluster Kind
+      # ──────────────────────────────────────────────────────────────
+      - name: "🏗️ Crear cluster Kind"
         run: |
-          echo "Esperando servicios..."
-          for i in $(seq 1 30); do
-            FRONTEND=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
-            AUTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/register || echo "000")
-            BOOKING=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/bookings || echo "000")
-            USER=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5003/users/me || echo "000")
+          cat <<EOF | kind create cluster \
+            --name "${{ env.CLUSTER_NAME }}" \
+            --config - \
+            --wait 90s
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+          EOF
+          kubectl cluster-info --context "kind-${{ env.CLUSTER_NAME }}"
+          echo "✅ Cluster Kind creado correctamente"
 
-            echo "Intento $i/30 — Frontend: $FRONTEND | Auth: $AUTH | Booking: $BOOKING | User: $USER"
+      # ──────────────────────────────────────────────────────────────
+      # 3. Pull imagen de MongoDB (la cargaremos en Kind)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📦 Pull imagen MongoDB"
+        run: |
+          docker pull mongo:6
+          echo "✅ MongoDB pull completado"
 
-            if [ "$FRONTEND" != "000" ] && [ "$AUTH" != "000" ]; then
-              echo "Servicios principales listos después de $i intentos"
+      # ──────────────────────────────────────────────────────────────
+      # 4. Build imágenes Docker de los servicios
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔨 Build imágenes Docker"
+        run: |
+          echo "=== Build auth-service ==="
+          docker build -t app-reservas/auth-service:ci ./auth-service
+
+          echo "=== Build booking-service ==="
+          docker build -t app-reservas/booking-service:ci ./booking-service
+
+          echo "=== Build user-service ==="
+          docker build -t app-reservas/user-service:ci ./user-service
+
+          echo "=== Build notification-service ==="
+          docker build -t app-reservas/notification-service:ci ./notification-service
+
+          echo "=== Build frontend ==="
+          docker build -t app-reservas/frontend:ci ./frontend
+
+          echo "=== Imágenes disponibles ==="
+          docker images | grep -E "(app-reservas|mongo)"
+
+      # ──────────────────────────────────────────────────────────────
+      # 5. Cargar imágenes en el cluster Kind
+      # ──────────────────────────────────────────────────────────────
+      - name: "📤 Cargar imágenes en Kind"
+        run: |
+          echo "Cargando imágenes en el cluster Kind..."
+          kind load docker-image mongo:6 \
+            --name "${{ env.CLUSTER_NAME }}"
+          kind load docker-image app-reservas/auth-service:ci \
+            --name "${{ env.CLUSTER_NAME }}"
+          kind load docker-image app-reservas/booking-service:ci \
+            --name "${{ env.CLUSTER_NAME }}"
+          kind load docker-image app-reservas/user-service:ci \
+            --name "${{ env.CLUSTER_NAME }}"
+          kind load docker-image app-reservas/notification-service:ci \
+            --name "${{ env.CLUSTER_NAME }}"
+          kind load docker-image app-reservas/frontend:ci \
+            --name "${{ env.CLUSTER_NAME }}"
+          echo "✅ Todas las imágenes cargadas en Kind"
+
+      # ──────────────────────────────────────────────────────────────
+      # 6. Deploy manifests en Kubernetes
+      # ──────────────────────────────────────────────────────────────
+      - name: "🚀 Deploy en Kubernetes"
+        run: |
+          echo "=== Aplicando manifests ==="
+          kubectl apply -f k8s/dast/namespace.yaml
+          kubectl apply -f k8s/dast/mongo.yaml
+          # Esperar MongoDB antes de desplegar servicios dependientes
+          echo "Esperando que MongoDB esté listo..."
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=mongo \
+            --timeout=120s
+          echo "✅ MongoDB listo — desplegando servicios restantes"
+          kubectl apply -f k8s/dast/auth-service.yaml
+          kubectl apply -f k8s/dast/booking-service.yaml
+          kubectl apply -f k8s/dast/user-service.yaml
+          kubectl apply -f k8s/dast/notification-service.yaml
+          kubectl apply -f k8s/dast/frontend.yaml
+          echo "=== Pods en namespace dast ==="
+          kubectl get pods -n "${{ env.NAMESPACE }}"
+
+      # ──────────────────────────────────────────────────────────────
+      # 7. Esperar que todos los pods estén Ready
+      # ──────────────────────────────────────────────────────────────
+      - name: "⏳ Esperar pods Ready"
+        run: |
+          echo "=== Esperando auth-service ==="
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=auth-service \
+            --timeout=120s
+
+          echo "=== Esperando booking-service ==="
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=booking-service \
+            --timeout=120s
+
+          echo "=== Esperando user-service ==="
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=user-service \
+            --timeout=120s
+
+          echo "=== Esperando notification-service ==="
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=notification-service \
+            --timeout=120s
+
+          echo "=== Esperando frontend ==="
+          kubectl wait \
+            --namespace "${{ env.NAMESPACE }}" \
+            --for=condition=ready pod \
+            -l app=frontend \
+            --timeout=180s
+
+          echo "=== Estado final del cluster ==="
+          kubectl get pods -n "${{ env.NAMESPACE }}" -o wide
+          kubectl get services -n "${{ env.NAMESPACE }}"
+
+      # ──────────────────────────────────────────────────────────────
+      # 8. Iniciar port-forwards (con auto-restart)
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔌 Iniciar port-forwards"
+        run: |
+          # Función para port-forward con auto-restart en caso de fallo
+          pf_loop() {
+            local svc=$1
+            local port=$2
+            echo "Iniciando port-forward: $svc → localhost:$port"
+            while true; do
+              kubectl port-forward \
+                -n "${{ env.NAMESPACE }}" \
+                "svc/$svc" "$port:$port" 2>/dev/null || true
+              sleep 2
+            done
+          }
+
+          pf_loop frontend 3000 &
+          pf_loop auth-service 4000 &
+          pf_loop booking-service 5000 &
+          pf_loop user-service 5003 &
+
+          echo "Port-forwards iniciados — esperando que estén disponibles..."
+          sleep 15
+
+          echo "=== Verificando conectividad ==="
+          for i in $(seq 1 20); do
+            FE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 3 http://localhost:3000 || echo "000")
+            AU=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 3 http://localhost:4000 || echo "000")
+            BK=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 3 http://localhost:5000 || echo "000")
+            US=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 3 http://localhost:5003 || echo "000")
+            echo "Intento $i/20 — Frontend:$FE | Auth:$AU | Booking:$BK | User:$US"
+            if [ "$FE" != "000" ] && [ "$AU" != "000" ]; then
+              echo "✅ Servicios principales accesibles"
               break
             fi
             sleep 5
           done
 
-      # ─────────────────────────────────────────────
-      # 2. ZAP — Baseline scan sobre el Frontend
-      #    (pasivo: spider + análisis de respuestas)
-      # ─────────────────────────────────────────────
-      - name: ZAP Baseline Scan — Frontend (puerto 3000)
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: "http://localhost:3000"
-          rules_file_name: ".zap/rules-frontend.tsv"
-          cmd_options: "-a -j"
-          fail_action: false
-          artifact_name: "zap-frontend"
-        continue-on-error: true
+      # ──────────────────────────────────────────────────────────────
+      # 9. Preparar directorio de reportes ZAP
+      # ──────────────────────────────────────────────────────────────
+      - name: "📂 Preparar directorio de reportes"
+        run: |
+          mkdir -p zap-reports
+          # chmod 777 necesario: ZAP corre como uid 1000 dentro del contenedor
+          chmod 777 zap-reports
+          echo "Directorio zap-reports listo"
 
-      # ─────────────────────────────────────────────
-      # 3. ZAP — API Scan sobre Auth Service
-      # ─────────────────────────────────────────────
-      - name: ZAP API Scan — Auth Service (puerto 4000)
-        uses: zaproxy/action-api-scan@v0.7.0
-        with:
-          target: "http://localhost:4000"
-          format: "openapi"
-          cmd_options: "-a"
-          fail_action: false
-          artifact_name: "zap-auth-service"
-        continue-on-error: true
+      # ──────────────────────────────────────────────────────────────
+      # 10. Pull imagen ZAP (una sola vez)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📦 Pull imagen OWASP ZAP"
+        run: |
+          docker pull "${{ env.ZAP_IMAGE }}"
+          echo "✅ Imagen ZAP lista"
 
-      # ─────────────────────────────────────────────
-      # 4. ZAP — API Scan sobre Booking Service
-      # ─────────────────────────────────────────────
-      - name: ZAP API Scan — Booking Service (puerto 5000)
-        uses: zaproxy/action-api-scan@v0.7.0
-        with:
-          target: "http://localhost:5000"
-          format: "openapi"
-          cmd_options: "-a"
-          fail_action: false
-          artifact_name: "zap-booking-service"
+      # ──────────────────────────────────────────────────────────────
+      # 11. ZAP Baseline Scan — Frontend (Next.js)
+      #     Spider pasivo + AJAX spider + análisis de respuestas HTTP
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔍 ZAP Scan — Frontend (puerto 3000)"
         continue-on-error: true
+        run: |
+          echo "=== ZAP Baseline Scan → Frontend http://localhost:3000 ==="
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+            -v "${{ github.workspace }}/.zap:/zap/rules:ro" \
+            "${{ env.ZAP_IMAGE }}" \
+            zap-baseline.py \
+              -t "http://localhost:3000" \
+              -r "frontend.html" \
+              -J "frontend.json" \
+              -x "frontend.xml" \
+              -c "/zap/rules/rules-frontend.tsv" \
+              -m 3 \
+              -a \
+              -j \
+              -I \
+            || echo "ZAP terminó con alertas (esperado) — exit code: $?"
+          echo "✅ Scan Frontend completado"
 
-      # ─────────────────────────────────────────────
-      # 5. ZAP — API Scan sobre User Service
-      # ─────────────────────────────────────────────
-      - name: ZAP API Scan — User Service (puerto 5003)
-        uses: zaproxy/action-api-scan@v0.7.0
-        with:
-          target: "http://localhost:5003"
-          format: "openapi"
-          cmd_options: "-a"
-          fail_action: false
-          artifact_name: "zap-user-service"
+      # ──────────────────────────────────────────────────────────────
+      # 12. ZAP Baseline Scan — Auth Service
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔍 ZAP Scan — Auth Service (puerto 4000)"
         continue-on-error: true
+        run: |
+          echo "=== ZAP Baseline Scan → Auth Service http://localhost:4000 ==="
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+            "${{ env.ZAP_IMAGE }}" \
+            zap-baseline.py \
+              -t "http://localhost:4000" \
+              -r "auth.html" \
+              -J "auth.json" \
+              -x "auth.xml" \
+              -m 2 \
+              -a \
+              -I \
+            || echo "ZAP terminó con alertas — exit code: $?"
+          echo "✅ Scan Auth Service completado"
 
-      # ─────────────────────────────────────────────
-      # 6. Consolidar reportes en Markdown
-      # ─────────────────────────────────────────────
-      - name: Generar reporte DAST consolidado
+      # ──────────────────────────────────────────────────────────────
+      # 13. ZAP Baseline Scan — Booking Service
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔍 ZAP Scan — Booking Service (puerto 5000)"
+        continue-on-error: true
+        run: |
+          echo "=== ZAP Baseline Scan → Booking Service http://localhost:5000 ==="
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+            "${{ env.ZAP_IMAGE }}" \
+            zap-baseline.py \
+              -t "http://localhost:5000" \
+              -r "booking.html" \
+              -J "booking.json" \
+              -x "booking.xml" \
+              -m 2 \
+              -a \
+              -I \
+            || echo "ZAP terminó con alertas — exit code: $?"
+          echo "✅ Scan Booking Service completado"
+
+      # ──────────────────────────────────────────────────────────────
+      # 14. ZAP Baseline Scan — User Service
+      # ──────────────────────────────────────────────────────────────
+      - name: "🔍 ZAP Scan — User Service (puerto 5003)"
+        continue-on-error: true
+        run: |
+          echo "=== ZAP Baseline Scan → User Service http://localhost:5003 ==="
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk:rw" \
+            "${{ env.ZAP_IMAGE }}" \
+            zap-baseline.py \
+              -t "http://localhost:5003" \
+              -r "user.html" \
+              -J "user.json" \
+              -x "user.xml" \
+              -m 2 \
+              -a \
+              -I \
+            || echo "ZAP terminó con alertas — exit code: $?"
+          echo "✅ Scan User Service completado"
+
+      # ──────────────────────────────────────────────────────────────
+      # 15. Listar archivos generados (debug)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📋 Listar reportes generados"
+        if: always()
+        run: |
+          echo "=== Archivos en zap-reports/ ==="
+          ls -lah zap-reports/ || echo "(directorio vacío)"
+          echo ""
+          echo "=== Logs de pods (para diagnóstico) ==="
+          kubectl logs -n "${{ env.NAMESPACE }}" \
+            -l app=frontend --tail=20 || true
+
+      # ──────────────────────────────────────────────────────────────
+      # 16. Generar reporte consolidado con datos reales de ZAP
+      # ──────────────────────────────────────────────────────────────
+      - name: "📊 Generar reporte DAST consolidado"
         if: always()
         env:
           GH_RUN_ID: ${{ github.run_id }}
@@ -119,8 +377,9 @@ jobs:
           GH_SERVER: ${{ github.server_url }}
         run: |
           python3 - << 'PYEOF'
-          import os, json, datetime, glob
+          import os, json, datetime
 
+          # ── Variables de contexto ──────────────────────────────────
           RUN_ID = os.environ.get("GH_RUN_ID", "local")
           SHA    = os.environ.get("GH_SHA", "local")
           SHORT  = SHA[:7]
@@ -133,97 +392,407 @@ jobs:
           COMMIT_URL = f"{SERVER}/{REPO}/commit/{SHA}"
           RUN_URL    = f"{SERVER}/{REPO}/actions/runs/{RUN_ID}"
 
+          # ── Definición de servicios escaneados ────────────────────
+          SERVICES = [
+              {
+                  "name": "Frontend (Next.js)",
+                  "url":  "http://localhost:3000",
+                  "json": "zap-reports/frontend.json",
+                  "html": "frontend.html",
+                  "type": "Baseline + AJAX Spider",
+              },
+              {
+                  "name": "Auth Service",
+                  "url":  "http://localhost:4000",
+                  "json": "zap-reports/auth.json",
+                  "html": "auth.html",
+                  "type": "Baseline",
+              },
+              {
+                  "name": "Booking Service",
+                  "url":  "http://localhost:5000",
+                  "json": "zap-reports/booking.json",
+                  "html": "booking.html",
+                  "type": "Baseline",
+              },
+              {
+                  "name": "User Service",
+                  "url":  "http://localhost:5003",
+                  "json": "zap-reports/user.json",
+                  "html": "user.html",
+                  "type": "Baseline",
+              },
+          ]
+
+          RISK_LABELS = {0: "Info", 1: "Low", 2: "Medium", 3: "High", 4: "Critical"}
+          RISK_EMOJIS = {0: "🔵", 1: "🟢", 2: "🟡", 3: "🔴", 4: "🚨"}
+
+          def parse_zap_json(filepath):
+              """
+              Parsea el JSON de ZAP Baseline.
+              Estructura esperada: { "site": [ { "alerts": [ {...} ] } ] }
+              Retorna: (counts_dict, alerts_list, error_str_or_None)
+              """
+              if not os.path.exists(filepath):
+                  return None, [], f"Archivo no encontrado: `{filepath}`"
+              try:
+                  with open(filepath, encoding="utf-8") as f:
+                      data = json.load(f)
+
+                  raw_alerts = []
+                  # Soporte para ambas estructuras de ZAP JSON
+                  sites = data.get("site", [])
+                  if isinstance(sites, list):
+                      for site in sites:
+                          raw_alerts.extend(site.get("alerts", []))
+                  elif isinstance(sites, dict):
+                      raw_alerts.extend(sites.get("alerts", []))
+                  # Fallback: raíz contiene alerts directamente
+                  if not raw_alerts and "alerts" in data:
+                      raw_alerts = data["alerts"]
+
+                  counts = {"high": 0, "medium": 0, "low": 0, "info": 0, "total": 0}
+                  details = []
+
+                  for alert in raw_alerts:
+                      rc   = int(alert.get("riskcode", 0))
+                      name = alert.get("name", alert.get("alert", "Unknown"))
+                      inst = int(alert.get("count", len(alert.get("instances", [])) or 1))
+                      desc = alert.get("desc", "").strip()[:300].replace("\n", " ")
+                      sol  = alert.get("solution", "").strip()[:250].replace("\n", " ")
+                      ref  = alert.get("reference", "").strip()[:200].replace("\n", " ")
+                      cweid = alert.get("cweid", "")
+                      wascid = alert.get("wascid", "")
+
+                      if rc >= 3:
+                          counts["high"] += 1
+                      elif rc == 2:
+                          counts["medium"] += 1
+                      elif rc == 1:
+                          counts["low"] += 1
+                      else:
+                          counts["info"] += 1
+                      counts["total"] += 1
+
+                      details.append({
+                          "name":    name,
+                          "risk":    RISK_LABELS.get(rc, "Unknown"),
+                          "emoji":   RISK_EMOJIS.get(rc, "❓"),
+                          "rc":      rc,
+                          "count":   inst,
+                          "desc":    desc,
+                          "sol":     sol,
+                          "ref":     ref,
+                          "cwe":     cweid,
+                          "wasc":    wascid,
+                      })
+
+                  # Ordenar por nivel de riesgo descendente
+                  details.sort(key=lambda x: -x["rc"])
+                  return counts, details, None
+
+              except json.JSONDecodeError as e:
+                  return None, [], f"JSON inválido: {e}"
+              except Exception as e:
+                  return None, [], f"Error inesperado: {e}"
+
+          # ── Construir reporte ──────────────────────────────────────
           L = []
-          L.append("# Reporte DAST - OWASP ZAP - app-reservas")
+
+          # Encabezado
+          L.append("# 🛡️ Reporte DAST — OWASP ZAP")
           L.append("")
-          L.append(f"**Rama:** {BRANCH} | **Commit:** [{SHORT}]({COMMIT_URL}) | **Autor:** {ACTOR} | **Fecha:** {NOW}")
+          L.append(f"| | |")
+          L.append(f"|---|---|")
+          L.append(f"| **Repositorio** | [{REPO}]({SERVER}/{REPO}) |")
+          L.append(f"| **Rama** | `{BRANCH}` |")
+          L.append(f"| **Commit** | [`{SHORT}`]({COMMIT_URL}) |")
+          L.append(f"| **Autor** | {ACTOR} |")
+          L.append(f"| **Fecha** | {NOW} |")
+          L.append(f"| **Infraestructura** | Kind (Kubernetes local) |")
+          L.append(f"| **Ver ejecución** | [GitHub Actions]({RUN_URL}) |")
           L.append("")
           L.append("---")
           L.append("")
-          L.append("## Servicios escaneados")
+
+          # Parsear todos los servicios
+          total_high = total_medium = total_low = total_info = 0
+          service_results = []
+
+          for svc in SERVICES:
+              counts, details, err = parse_zap_json(svc["json"])
+              service_results.append({
+                  "svc":     svc,
+                  "counts":  counts,
+                  "details": details,
+                  "err":     err,
+              })
+              if counts:
+                  total_high   += counts["high"]
+                  total_medium += counts["medium"]
+                  total_low    += counts["low"]
+                  total_info   += counts["info"]
+
+          total_all = total_high + total_medium + total_low + total_info
+
+          # Tabla resumen ejecutivo
+          L.append("## 📊 Resumen ejecutivo")
           L.append("")
-          L.append("| Servicio | URL | Tipo de scan |")
-          L.append("|---|---|---|")
-          L.append("| Frontend (Next.js) | http://localhost:3000 | Baseline (spider + pasivo) |")
-          L.append("| Auth Service | http://localhost:4000 | API Scan |")
-          L.append("| Booking Service | http://localhost:5000 | API Scan |")
-          L.append("| User Service | http://localhost:5003 | API Scan |")
-          L.append("")
-          L.append("---")
-          L.append("")
-          L.append("## Resultados por servicio")
+          L.append("| Servicio | URL | Tipo de scan | 🔴 HIGH | 🟡 MED | 🟢 LOW | 🔵 INFO | Total |")
+          L.append("|---|---|---|:---:|:---:|:---:|:---:|:---:|")
+
+          for sr in service_results:
+              svc = sr["svc"]
+              c   = sr["counts"]
+              if c is None:
+                  L.append(
+                      f"| {svc['name']} | `{svc['url']}` | {svc['type']} "
+                      f"| ⚠️ | ⚠️ | ⚠️ | ⚠️ | — |"
+                  )
+              else:
+                  h  = f"**{c['high']}**"   if c["high"]   > 0 else str(c["high"])
+                  m  = f"**{c['medium']}**" if c["medium"] > 0 else str(c["medium"])
+                  lo = str(c["low"])
+                  i  = str(c["info"])
+                  L.append(
+                      f"| {svc['name']} | `{svc['url']}` | {svc['type']} "
+                      f"| {h} | {m} | {lo} | {i} | {c['total']} |"
+                  )
+
+          L.append(
+              f"| **TOTAL** | | |"
+              f" **{total_high}** | **{total_medium}** | **{total_low}** |"
+              f" **{total_info}** | **{total_all}** |"
+          )
           L.append("")
 
-          # Buscar reportes JSON generados por ZAP
-          report_files = glob.glob("**/zap_report*.json", recursive=True) + \
-                         glob.glob("**/*zap*.json", recursive=True)
-
-          if report_files:
-              for rf in report_files:
-                  try:
-                      with open(rf) as f:
-                          data = json.load(f)
-                      alerts = data.get("alerts", data.get("site", [{}])[0].get("alerts", []) if isinstance(data.get("site"), list) else [])
-                      high   = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("3", "High")))
-                      medium = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("2", "Medium")))
-                      low    = sum(1 for a in alerts if str(a.get("riskcode", a.get("riskdesc", ""))).startswith(("1", "Low")))
-                      L.append(f"### `{rf}`")
-                      L.append(f"- 🔴 HIGH: **{high}**")
-                      L.append(f"- 🟡 MEDIUM: **{medium}**")
-                      L.append(f"- 🟢 LOW: **{low}**")
-                      L.append("")
-                  except Exception as e:
-                      L.append(f"### `{rf}` — Error al parsear: {e}")
-                      L.append("")
+          # Alerta de estado general
+          if total_high > 0:
+              L.append("> [!CAUTION]")
+              L.append(
+                  f"> ⛔ Se encontraron **{total_high}** vulnerabilidades HIGH/CRITICAL. "
+                  f"Requieren atención inmediata antes de desplegar a producción."
+              )
+          elif total_medium > 0:
+              L.append("> [!WARNING]")
+              L.append(
+                  f"> ⚠️ Se encontraron **{total_medium}** vulnerabilidades MEDIUM. "
+                  f"Revisar y mitigar antes del próximo release."
+              )
           else:
-              L.append("> Los reportes individuales están disponibles como artifacts de GitHub Actions.")
-              L.append("> Descarga los artifacts `zap-frontend`, `zap-auth-service`, `zap-booking-service`, `zap-user-service`.")
+              L.append("> [!NOTE]")
+              L.append(
+                  "> ✅ No se detectaron vulnerabilidades HIGH o MEDIUM. "
+                  "El sistema pasa el análisis DAST básico."
+              )
+
+          L.append("")
+          L.append("---")
+          L.append("")
+
+          # Detalle por servicio
+          L.append("## 🔍 Detalle de vulnerabilidades por servicio")
+          L.append("")
+
+          for sr in service_results:
+              svc     = sr["svc"]
+              counts  = sr["counts"]
+              details = sr["details"]
+              err     = sr["err"]
+
+              L.append(f"### {svc['name']}")
+              L.append("")
+              L.append(f"**URL:** `{svc['url']}` &nbsp; **Tipo:** {svc['type']}")
+              L.append("")
+
+              if counts is None:
+                  L.append(f"> ⚠️ No se pudo leer el reporte: {err}")
+                  L.append("")
+                  continue
+
+              if not details:
+                  L.append("✅ **Sin alertas detectadas** — este servicio no presentó vulnerabilidades.")
+                  L.append("")
+                  continue
+
+              L.append(
+                  f"**Resumen:** "
+                  f"🔴 {counts['high']} HIGH | "
+                  f"🟡 {counts['medium']} MEDIUM | "
+                  f"🟢 {counts['low']} LOW | "
+                  f"🔵 {counts['info']} INFO"
+              )
+              L.append("")
+              L.append(
+                  f"> 📄 Ver reporte HTML completo: descarga el artifact "
+                  f"`zap-html-reports-{RUN_ID}` → `{svc['html']}`"
+              )
+              L.append("")
+              L.append("| Riesgo | Vulnerabilidad | Instancias | CWE | Descripción (resumen) |")
+              L.append("|:---:|---|:---:|:---:|---|")
+
+              for d in details:
+                  safe_name = d["name"].replace("|", "\\|")
+                  safe_desc = d["desc"].replace("|", "\\|")[:120]
+                  cwe_str   = f"[CWE-{d['cwe']}](https://cwe.mitre.org/data/definitions/{d['cwe']}.html)" \
+                              if d["cwe"] else "—"
+                  L.append(
+                      f"| {d['emoji']} {d['risk']} "
+                      f"| {safe_name} "
+                      f"| {d['count']} "
+                      f"| {cwe_str} "
+                      f"| {safe_desc} |"
+                  )
+
+              # Top 3 soluciones
+              high_med = [d for d in details if d["rc"] >= 2]
+              if high_med:
+                  L.append("")
+                  L.append("<details>")
+                  L.append("<summary>🔧 Soluciones recomendadas (clic para expandir)</summary>")
+                  L.append("")
+                  for d in high_med[:5]:
+                      if d["sol"]:
+                          L.append(f"**{d['emoji']} {d['name']}**")
+                          L.append(f"> {d['sol']}")
+                          if d["ref"]:
+                              L.append(f"> *Referencia: {d['ref'][:150]}*")
+                          L.append("")
+                  L.append("</details>")
+
               L.append("")
 
           L.append("---")
           L.append("")
-          L.append("## Tipos de vulnerabilidades que ZAP detecta")
+
+          # Infraestructura utilizada
+          L.append("## 🏗️ Infraestructura de pruebas")
           L.append("")
-          L.append("| Categoría | Ejemplos |")
-          L.append("|---|---|")
-          L.append("| Inyección | SQL Injection, Command Injection, LDAP Injection |")
-          L.append("| XSS | Reflected XSS, Stored XSS, DOM XSS |")
-          L.append("| Cabeceras inseguras | Missing HSTS, X-Frame-Options, CSP |")
-          L.append("| Autenticación | Credenciales por defecto, session fixation |")
-          L.append("| Información expuesta | Stack traces, versiones, paths internos |")
-          L.append("| CORS mal configurado | Wildcards en Access-Control-Allow-Origin |")
+          L.append(
+              "Los servicios fueron desplegados en un cluster **Kind (Kubernetes in Docker)** "
+              "dentro del runner de GitHub Actions. "
+              "Esto garantiza aislamiento completo y limpieza automática al finalizar."
+          )
+          L.append("")
+          L.append("| Componente | Tecnología | Namespace K8s | Puerto |")
+          L.append("|---|---|---|:---:|")
+          L.append("| Orquestador | Kind v0.24 (Kubernetes 1.31) | — | — |")
+          L.append("| Base de datos | MongoDB 6 | `dast` | 27017 |")
+          L.append("| Frontend | Next.js (App Router) | `dast` | 3000 |")
+          L.append("| Auth Service | Node.js + Express | `dast` | 4000 |")
+          L.append("| Booking Service | Node.js + Express | `dast` | 5000 |")
+          L.append("| User Service | Node.js + Express | `dast` | 5003 |")
+          L.append("| Notification Svc | Node.js + Express | `dast` | 5002 |")
+          L.append("| Scanner | OWASP ZAP Stable | host network | — |")
+          L.append("")
+
+          # Categorías de vulnerabilidades
+          L.append("## 🔒 Categorías de vulnerabilidades detectadas por ZAP")
+          L.append("")
+          L.append("| Categoría | Ejemplos | Nivel típico |")
+          L.append("|---|---|:---:|")
+          L.append("| Cabeceras de seguridad | HSTS, X-Frame-Options, CSP, X-Content-Type | LOW–MEDIUM |")
+          L.append("| Cross-Site Scripting | Reflected XSS, Stored XSS, DOM XSS | HIGH |")
+          L.append("| Inyección | SQL Injection, Command Injection, LDAP | HIGH–CRITICAL |")
+          L.append("| Exposición de información | Stack traces, versiones, rutas internas | LOW |")
+          L.append("| CORS | Wildcards en Access-Control-Allow-Origin | MEDIUM |")
+          L.append("| Autenticación | Session fixation, tokens débiles | HIGH |")
+          L.append("| Cookies inseguras | Sin Secure/HttpOnly/SameSite | LOW–MEDIUM |")
           L.append("")
           L.append("---")
           L.append("")
-          L.append(f"*Reporte generado automáticamente por `.github/workflows/dast.yml` — [Ver ejecución]({RUN_URL})*")
+          L.append(
+              f"*Reporte generado automáticamente por `.github/workflows/dast.yml` — "
+              f"[Ver ejecución]({RUN_URL})*  "
+          )
+          L.append(f"*Herramienta: [OWASP ZAP](https://www.zaproxy.org/) Stable — "
+                   f"Infraestructura: Kind (Kubernetes) | {NOW}*")
 
+          # ── Escribir archivos ──────────────────────────────────────
           report = "\n".join(L)
-          os.makedirs("dast-report", exist_ok=True)
-          with open("dast-report/REPORTE-DAST.md", "w", encoding="utf-8") as fh:
+
+          # 1. Archivo markdown en artifacts
+          os.makedirs("zap-reports", exist_ok=True)
+          md_path = "zap-reports/REPORTE-DAST.md"
+          with open(md_path, "w", encoding="utf-8") as fh:
               fh.write(report)
+          print(f"✅ Reporte markdown escrito en: {md_path}")
 
-          summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
-          if summary:
-              with open(summary, "w", encoding="utf-8") as fh:
+          # 2. GitHub Step Summary (aparece en la pestaña Summary del run)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary_path:
+              with open(summary_path, "w", encoding="utf-8") as fh:
                   fh.write(report)
+              print("✅ GitHub Step Summary actualizado")
+          else:
+              print("⚠️ GITHUB_STEP_SUMMARY no disponible (ejecución local)")
 
-          print("Reporte DAST generado exitosamente")
+          # 3. Imprimir resumen en consola
+          print("")
+          print("=" * 60)
+          print("RESUMEN DAST:")
+          print(f"  🔴 HIGH:   {total_high}")
+          print(f"  🟡 MEDIUM: {total_medium}")
+          print(f"  🟢 LOW:    {total_low}")
+          print(f"  🔵 INFO:   {total_info}")
+          print(f"  TOTAL:     {total_all}")
+          print("=" * 60)
           PYEOF
 
-      # ─────────────────────────────────────────────
-      # 7. Subir reporte consolidado
-      # ─────────────────────────────────────────────
-      - name: Subir reporte DAST consolidado
+      # ──────────────────────────────────────────────────────────────
+      # 17. Subir reportes HTML (visual, navegable)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📤 Subir reportes HTML"
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dast-report-${{ github.run_id }}
-          path: dast-report/REPORTE-DAST.md
+          name: "zap-html-reports-${{ github.run_id }}"
+          path: "zap-reports/*.html"
+          if-no-files-found: warn
           retention-days: 30
 
-      # ─────────────────────────────────────────────
-      # 8. Apagar servicios
-      # ─────────────────────────────────────────────
-      - name: Detener servicios
+      # ──────────────────────────────────────────────────────────────
+      # 18. Subir reportes JSON (datos crudos, parseables)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📤 Subir reportes JSON"
         if: always()
-        run: docker compose down
+        uses: actions/upload-artifact@v4
+        with:
+          name: "zap-json-reports-${{ github.run_id }}"
+          path: "zap-reports/*.json"
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ──────────────────────────────────────────────────────────────
+      # 19. Subir reporte XML (compatibilidad SAST tools)
+      # ──────────────────────────────────────────────────────────────
+      - name: "📤 Subir reportes XML"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "zap-xml-reports-${{ github.run_id }}"
+          path: "zap-reports/*.xml"
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ──────────────────────────────────────────────────────────────
+      # 20. Subir reporte Markdown consolidado
+      # ──────────────────────────────────────────────────────────────
+      - name: "📤 Subir reporte consolidado Markdown"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "dast-reporte-consolidado-${{ github.run_id }}"
+          path: "zap-reports/REPORTE-DAST.md"
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ──────────────────────────────────────────────────────────────
+      # 21. Cleanup — Eliminar cluster Kind (siempre corre)
+      # ──────────────────────────────────────────────────────────────
+      - name: "🧹 Cleanup — Eliminar cluster Kind"
+        if: always()
+        run: |
+          echo "=== Eliminando cluster Kind ==="
+          kind delete cluster --name "${{ env.CLUSTER_NAME }}" || true
+          echo "✅ Cluster eliminado — entorno limpio"

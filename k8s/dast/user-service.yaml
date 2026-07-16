@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: dast
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-service
+          image: app-reservas/user-service:ci
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5003
+          env:
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/user-service-db"
+            - name: JWT_SECRET
+              value: "ci-dast-test-secret-do-not-use-in-production"
+            - name: PORT
+              value: "5003"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
+          readinessProbe:
+            tcpSocket:
+              port: 5003
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 5003
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: dast
+  labels:
+    app: user-service
+spec:
+  selector:
+    app: user-service
+  ports:
+    - name: http
+      port: 5003
+      targetPort: 5003
+  type: ClusterIP
